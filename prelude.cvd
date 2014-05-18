@@ -1,0 +1,49 @@
+(print "### BEGIN PRELUDE ###")
+
+(define (last xs) 
+  (if (= 1 (len xs)) 
+    (head xs)
+    (last (tail xs))))
+
+(define (init xs) 
+  (if (= 1 (len xs)) 
+    ()
+    (cons (head xs) (init (tail xs)))))
+
+(define (foldr func initial xs)
+  (if (nil? xs) 
+    initial
+    (func (head xs) (foldr func initial (tail xs)))))
+
+(define (foldl func initial xs) 
+  (if (nil? xs) 
+    initial
+    (foldl func (func initial (head xs)) (tail xs))))
+
+(define (map mfunc ys) 
+  (foldr (lambda (x y) 
+    (cons (mfunc x) y)) () ys))
+
+(define (take n xs) 
+  (if (nil? xs) 
+    ()
+    (if (= 0 n)
+      ()
+      (cons (head xs) (take (- n 1) (tail xs))))))
+
+(define (drop n xs) 
+  (if (nil? xs) 
+    ()
+    (if (= 0 n)
+      xs
+      (drop (- n 1) (tail xs)))))
+
+(define (split n xs) 
+  (cons (take n xs) (drop n xs)))
+
+(define (lookup k xs) 
+  (if (s= k (head xs))
+    (head (tail xs))
+    (lookup k (drop 2 xs))))
+
+(print "### END PRELUDE ###")
