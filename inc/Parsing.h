@@ -98,11 +98,11 @@ struct ParseNode {
   }
 
   ParseNode* getLeft() const {
-    if (pLeft.get()) return pLeft.get();
+    if (pLeft.get()) return pLeft.get(); else return 0;
   }
 
   ParseNode* getRight() const {
-    if (pRight.get()) return pRight.get();
+    if (pRight.get()) return pRight.get(); else return 0;
   }
 
 private:
@@ -251,6 +251,7 @@ any(const std::string& str) {
     }
 
     error(match, "parse");
+    return 0;
   });
 };
 

@@ -118,7 +118,7 @@ struct Expr {
 
   virtual void   print () = 0;
   virtual Expr* eval  (Scope* pScope) = 0;
-  virtual Expr* clone () {};
+  //virtual Expr* clone () ;
 };
 
 struct Sym;

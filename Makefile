@@ -26,29 +26,15 @@
 #
 #  TODO Get a real build
 
-CC      := g++ 
-
 BIN_DIR := ./bin
 SRC_DIR := ./src
-LIB_DIR := ./lib
-OBJ_DIR := ./obj
 INC_DIR := ./inc
-TST_DIR := ./tst
 TGT_DIR := ./tgt
-DEP_DIR := ./dep
-
-clean:
-	rm -f ./bin/*
-	rm -f ./lib/*
-	rm -f ./obj/*
-
-all::
-	# Running all tests...
-	
-.PHONY: all
 
 $(BIN_DIR)/corvid: src/Corvid.cpp inc/Corvid.h inc/Bindings.h
-	$(CC) -O0 -g -pg -o $@ -std=gnu++0x -pthread -L$(LIB_DIR) -lsqlite3 src/Corvid.cpp -I$(INC_DIR) -MMD -MT $@ -MF $(DEP_DIR)/$(notdir $(basename $<)).d 
+	# Building corvid	
+	@mkdir -p $(BIN_DIR)
+	$(CXX) -O0 -g -pg -o $@ -std=gnu++0x -pthread src/Corvid.cpp -I$(INC_DIR) 
 
 corvid.gdb: $(BIN_DIR)/corvid
 	# Executing corvid
@@ -59,3 +45,10 @@ corvid.run: $(BIN_DIR)/corvid
 	$<
 
 corvid: $(BIN_DIR)/corvid
+
+clean:
+	rm -f ./bin/*
+	rm -f ./lib/*
+	rm -f ./obj/*
+	rm -f ./dep/*
+
