@@ -1,6 +1,6 @@
 #-------------------------------------------------------------------------------
 #
-# corvid::Makefile
+# helpers.mak
 #
 #  The MIT License (MIT)
 #
@@ -25,41 +25,8 @@
 #  SOFTWARE.
 #
 
-BIN_DIR := ./bin
-SRC_DIR := ./src
-INC_DIR := ./inc
-TGT_DIR := ./tgt
-
-default: all
-
-#XXX Move to targets.mak
-# No cross-compilation... yet
-OS          := $(shell uname -s)
-HOST        := $(OS)-$(shell uname -m)
-TGT_DIR     := ./tgt/$(HOST)
-
-include mak/helpers.mak
-include mak/sources.mak
-#include mak/boost.mak
-include mak/application.mak
-include mak/staticlib.mak
-include mak/sharedlib.mak
-
-CORVID_CXXFLAGS    := -std=gnu++0x
-CORVID_CXXFLAGS    += -Iinc/
-CORVID_LDFLAGS     := -pthread 
-
-CORVID_SRCS        := src/Corvid.cpp #$(shell find src -name *.cpp) 
-
-# Some lovely DEBUG options (make DEBUG=1)
-ifdef DEBUG
-  CORVID_CXXFLAGS  += -O0 -g
-else
-  CORVID_CXXFLAGS  += -O3 
-endif
-
-all::
-.PHONY: all
-
-# Create all the targets for our application, and specify any compiler or linker dependencies
-$(eval $(call APPLICATION,corvid))
+#-------------------------------------------------------------------------------
+#
+# UPCASE($1 = text)
+#
+UPCASE = $(shell echo $1 | tr '[:lower:]' '[:upper:]')

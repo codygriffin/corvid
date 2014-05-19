@@ -1,6 +1,6 @@
 #-------------------------------------------------------------------------------
 #
-# corvid::Makefile
+# boost.mak
 #
 #  The MIT License (MIT)
 #
@@ -25,41 +25,41 @@
 #  SOFTWARE.
 #
 
-BIN_DIR := ./bin
-SRC_DIR := ./src
-INC_DIR := ./inc
-TGT_DIR := ./tgt
+# Some boost definitions
+BOOST       := boost_1_55_0.tar.gz
+BOOST_BUILD := ./cots/boost_1_55_0
+BOOST_LIBS  ?= date_time program_options exception log thread system filesystem serialization
 
-default: all
+BOOST_PATH  := $(TGT_DIR)/boost
+BOOST_INC   := $(BOOST_PATH)/include
+BOOST_LIB   := $(BOOST_PATH)/lib
 
-#XXX Move to targets.mak
-# No cross-compilation... yet
-OS          := $(shell uname -s)
-HOST        := $(OS)-$(shell uname -m)
-TGT_DIR     := ./tgt/$(HOST)
+# Create a list of the static libs that need to be linked
+STATIC_BOOST_LIBS := $(foreach lib,$(BOOST_LIBS), $(BOOST_LIB)/libboost_$(lib).a)
 
-include mak/helpers.mak
-include mak/sources.mak
-#include mak/boost.mak
-include mak/application.mak
-include mak/staticlib.mak
-include mak/sharedlib.mak
+$(BOOST_BUILD):
+	# Extracting $(BOOST)
+	cd cots; tar -xf $(BOOST)
 
-CORVID_CXXFLAGS    := -std=gnu++0x
-CORVID_CXXFLAGS    += -Iinc/
-CORVID_LDFLAGS     := -pthread 
+BOOST_JOINED_LIBS := $(shell echo $(BOOST_LIBS) | sed 's/ /,/g')
 
-CORVID_SRCS        := src/Corvid.cpp #$(shell find src -name *.cpp) 
+$(BOOST_PATH): $(BOOST_BUILD)
+	mkdir -p $(BOOST_PATH)
+	cd $(BOOST_BUILD); \
+	patch boost/atomic/detail/cas128strong.hpp < ../cas128strong.patch; \
+	patch boost/atomic/detail/gcc-atomic.hpp < ../gcc-atomic.patch; \
+	./bootstrap.sh --with-libraries=$(BOOST_JOINED_LIBS) --prefix=../../$(BOOST_PATH); \
+	./b2 -j12 link=static threading=multi address-model=64 cxxflags=-std=c++11 install
 
-# Some lovely DEBUG options (make DEBUG=1)
-ifdef DEBUG
-  CORVID_CXXFLAGS  += -O0 -g
-else
-  CORVID_CXXFLAGS  += -O3 
-endif
+$(BOOST_LIB) $(BOOST_INC): $(BOOST_PATH)
+.INTERMEDIATE: $(BOOST_PATH)
 
-all::
-.PHONY: all
+boost: $(BOOST_LIB) $(BOOST_INC)
 
-# Create all the targets for our application, and specify any compiler or linker dependencies
-$(eval $(call APPLICATION,corvid))
+boost.clean:
+	rm -rf $(BOOST_BUILD)
+	rm -rf $(BOOST_PATH)
+
+clean:: boost.clean
+
+.PHONY: boost boost.clean
