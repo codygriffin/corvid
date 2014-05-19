@@ -31,7 +31,7 @@ SRC_DIR := ./src
 INC_DIR := ./inc
 TGT_DIR := ./tgt
 
-$(BIN_DIR)/corvid: src/Corvid.cpp inc/Corvid.h inc/Bindings.h
+$(BIN_DIR)/corvid: src/Corvid.cpp inc/Corvid.h inc/Bindings.h inc/Parsing.h
 	# Building corvid	
 	@mkdir -p $(BIN_DIR)
 	$(CXX) -O0 -g -pg -o $@ -std=gnu++0x -pthread src/Corvid.cpp -I$(INC_DIR) 

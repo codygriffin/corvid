@@ -273,7 +273,7 @@ List*  buildListFromTail (ParseNode* pNode) {
 
 Expr* buildExpr(ParseNode* pNode) {
   if (!pNode) {
-    return 0;
+    throw std::runtime_error("cannot build expression from null node");
   }
 
   // build terminal nodes
@@ -302,21 +302,18 @@ Expr* buildExpr(ParseNode* pNode) {
     return buildListFromTail(pNode);
   }
   
+  // If we only have a left side...
   if (pNode->pLeft.get() && !pNode->pRight.get()) {
     return buildExpr(pNode->pLeft.get());
   }
 
+  // If we only have a right side...
   if (!pNode->pLeft.get() && pNode->pRight.get()) {
     return buildExpr(pNode->pRight.get());
   }
 
-  return 0;
+  throw std::runtime_error("cannot build expression from unknown node");
 }
-
-struct Lexeme {
-  TokenTypes  token_;
-  std::string string_;
-};
 
 Lexer::Lexer() { 
   space     = skip(' ', '\n');
@@ -352,14 +349,14 @@ Lexer::Lexer() {
   str  = dquote   + strchars + dquote;
 }
 
+// Tokens and stuff  (mostly terminals)
 Lexer lex;
 
+// Syntax (non-terminals)
 NonTerminal<ATOM>  atom; 
-
 NonTerminal<LIST>  list; 
 NonTerminal<HEAD>  head; 
 NonTerminal<TAIL>  tail; 
-
 NonTerminal<ITEM>  item; 
 NonTerminal<SEXPR> sexpr; 
 NonTerminal<PROG>  program;

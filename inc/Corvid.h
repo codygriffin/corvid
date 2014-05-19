@@ -44,13 +44,18 @@
 namespace corvid {
 
 enum TokenTypes {
-  // Primitives
+  // Terminals
   SYM,
   STR,
   INT,
   FLOAT,
   BOOL,
+  DQUOTE,
+  QUOTE,
+  PAREN,
+  BRACE,
 
+  // Non-terminals
   LIST,
   HEAD,
   TAIL,
@@ -61,10 +66,6 @@ enum TokenTypes {
   ATOM,
   SEXPR,
   PROG,
-  DQUOTE,
-  QUOTE,
-  PAREN,
-  BRACE,
 };
 
 struct Lexer {
@@ -108,6 +109,7 @@ struct Scope;
   
 struct Atom;
 struct List;
+// An expression is an Atom or a List
 struct Expr {
   Expr()         : pAtom(0), pList(0) {}
   Expr(Atom* p)  : pAtom(p), pList(0) {}
@@ -116,9 +118,9 @@ struct Expr {
   Atom* pAtom;
   List* pList;
 
-  virtual void   print () = 0;
+  // Expressions are abstract
+  virtual void  print ()              = 0;
   virtual Expr* eval  (Scope* pScope) = 0;
-  //virtual Expr* clone () ;
 };
 
 struct Sym;
@@ -126,6 +128,7 @@ struct Int;
 struct Float;
 struct Str;
 struct Fun;
+// An atom is a symbol, int, float, string or function
 struct Atom : public Expr {
   Atom()         : Expr(this), pSym(0), pInt(0), pFloat(0), pStr(0), pFun(0) {} 
   Atom(Sym* p)   : Expr(this), pSym(p), pInt(0), pFloat(0), pStr(0), pFun(0) {} 
@@ -139,6 +142,8 @@ struct Atom : public Expr {
   Float* pFloat;
   Str*   pStr;
   Fun*   pFun;
+
+  // Also abstract
 };
 
 List *nil;
@@ -213,7 +218,6 @@ struct List : public Expr {
   Expr* pHead;
   List*  pTail;
 };
-
 
 
 struct Scope {
@@ -379,13 +383,7 @@ struct Fun : public Atom {
 
 
 //------------------------------------------------------------------------------
-
-struct Program {
-  
-};
-
-//------------------------------------------------------------------------------
-// Type checking
+// Type checking/coersion
 template <typename T> T* as(Expr* pExpr) { return nil; }
 
 template <> Fun* as<Fun>(Expr* pExpr) { 

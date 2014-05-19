@@ -37,8 +37,14 @@
 
 //------------------------------------------------------------------------------
 
-typedef std::string::iterator Tit;
+typedef std::string::iterator StrIt;
 
+//------------------------------------------------------------------------------
+/* 
+ *  ParseNode represents a node in the resulting Abstract Syntax Tree.  
+ *
+ *  Currently, ASTs are binary trees (With Left and Right subtrees)
+ */
 struct ParseNode {
   enum Position {
     UNKNOWN,
@@ -49,6 +55,7 @@ struct ParseNode {
 
   static const int noContext = -1;
 
+  // Construct an empty ParseNode
   ParseNode(const std::string& m = "", ParseNode* pL = 0, ParseNode* pR = 0) 
   : match(m)
   , context(noContext)
@@ -98,11 +105,21 @@ struct ParseNode {
   }
 
   ParseNode* getLeft() const {
-    if (pLeft.get()) return pLeft.get(); else return 0;
+    if (pLeft.get()) {
+      return pLeft.get(); 
+    }
+  
+    throw std::runtime_error("ParseNode has no Left");
+    return 0;
   }
 
   ParseNode* getRight() const {
-    if (pRight.get()) return pRight.get(); else return 0;
+    if (pRight.get()) {
+      return pRight.get();
+    }
+
+    throw std::runtime_error("ParseNode has no Right");
+    return 0;
   }
 
 private:
@@ -124,9 +141,15 @@ public:
   std::unique_ptr<ParseNode> pRight;
 };
 
+// A Parser is any function that takes string iterators and returns a ParseNode
+// Errors are handled by throwing an exception
+typedef std::function<ParseNode* (StrIt& begin, StrIt& end)> Parser;
+
+// What are rules?
 struct Rule {
-  typedef std::function<ParseNode* (Tit& begin, Tit& end)> Parser;
-  static ParseNode* nil(Tit& begin, Tit& end) {
+
+  // The nil Parser is useful for initializing nil rules
+  static ParseNode* nil(StrIt& begin, StrIt& end) {
     return 0;
   }
 
@@ -148,7 +171,7 @@ struct Rule {
   , terminal_  (false) {
   }
 
-  ParseNode* parse(Tit& first, Tit& last) const {
+  ParseNode* parse(StrIt& first, StrIt& last) const {
     ParseNode* pNode = parse_(first, last);
     if (pNode) { 
       pNode->context = context_;
@@ -180,12 +203,14 @@ struct Rule {
   bool    terminal_;
 };
 
+// NonTerminal rules 
 template <int Tag>
 struct NonTerminal : public Rule {
   NonTerminal()                                      {Rule::context_ = Tag;}
   NonTerminal(const Rule& rule) : Rule (rule.parse_) {Rule::context_ = Tag;}
 };
 
+// Terminal rules 
 template <int Tag>
 struct Terminal : public Rule {
   Terminal()                                      {Rule::context_ = Tag; Rule::terminal_ = true;}
@@ -202,7 +227,7 @@ void error(const std::string& match, const std::string& context) {
 // Primitives 
 static Rule 
 range(char a, char b) {
-  return Rule([=](Tit& first, Tit& last) -> ParseNode* {
+  return Rule([=](StrIt& first, StrIt& last) -> ParseNode* {
     auto match = std::string(first, std::next(first));
     if (*first >= a && *first <= b) {
       std::advance(first, 1);
@@ -215,7 +240,7 @@ range(char a, char b) {
 
 static Rule 
 lit(char c) {
-  return Rule([=](Tit& first, Tit& last) -> ParseNode* {
+  return Rule([=](StrIt& first, StrIt& last) -> ParseNode* {
     auto match = std::string(first, std::next(first));
     if (*first == c) {
       std::advance(first, 1);
@@ -228,7 +253,7 @@ lit(char c) {
 
 static Rule 
 lit(const std::string& str) {
-  return Rule([=](Tit& first, Tit& last) -> ParseNode* {
+  return Rule([=](StrIt& first, StrIt& last) -> ParseNode* {
     auto match = std::string(first, std::next(first, str.length()));
     if (match == str) {
       std::advance(first, str.length());
@@ -241,7 +266,7 @@ lit(const std::string& str) {
 
 static Rule 
 any(const std::string& str) {
-  return Rule([=](Tit& first, Tit& last) -> ParseNode* {
+  return Rule([=](StrIt& first, StrIt& last) -> ParseNode* {
     auto match = std::string(first, std::next(first));
     for (auto c : str) {
       if (*first == c) {
@@ -257,7 +282,7 @@ any(const std::string& str) {
 
 static Rule 
 skip(char c, char d) {
-  return Rule([=](Tit& begin, Tit& end) -> ParseNode* {
+  return Rule([=](StrIt& begin, StrIt& end) -> ParseNode* {
     while ((*begin == c || *begin == d) && begin != end) {
       begin++;
     }
@@ -269,7 +294,7 @@ skip(char c, char d) {
 // Combinators
 Rule seq(const Rule& a, const Rule& b) {
   Rule seqRule;
-  seqRule.parse_ = [=](Tit& first, Tit& last) -> ParseNode* {
+  seqRule.parse_ = [=](StrIt& first, StrIt& last) -> ParseNode* {
     auto original = first;
     try {
       ParseNode* pNode = new ParseNode(); 
@@ -288,7 +313,7 @@ Rule seq(const Rule& a, const Rule& b) {
 
 Rule alt(const Rule& a, const Rule& b) {
   Rule altRule;
-  altRule.parse_ = [=](Tit& first, Tit& last) -> ParseNode* {
+  altRule.parse_ = [=](StrIt& first, StrIt& last) -> ParseNode* {
     auto original = first;
     try {
       ParseNode* pNode = new ParseNode(); 
@@ -310,7 +335,7 @@ Rule alt(const Rule& a, const Rule& b) {
 // Add a layer of indirection via a lambda
 Rule lazy(const Rule& a) {
   const Rule* pA = &a;
-  return Rule([=](Tit& begin, Tit& end) -> ParseNode* {
+  return Rule([=](StrIt& begin, StrIt& end) -> ParseNode* {
     return pA->parse(begin, end);
   });
 }
