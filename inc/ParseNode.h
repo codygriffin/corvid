@@ -58,11 +58,18 @@ struct ParseNode {
   // Construct an empty ParseNode
   ParseNode(const std::string& m = "", ParseNode* pL = 0, ParseNode* pR = 0) 
   : match(m)
-  , context(noContext)
   , position(UNKNOWN)
   , indirection(0) 
   , pLeft(pL)
   , pRight(pR)
+  {}
+
+  ParseNode(ParseNode& other) 
+  : match(other.match)
+  , position(other.position)
+  , indirection(other.indirection) 
+  , pLeft(other.pLeft.release())
+  , pRight(other.pRight.release())
   {}
     
   void terminate() {
@@ -70,17 +77,6 @@ struct ParseNode {
     pRight.reset(0);
   }
   
-  bool hasContext() {
-    return context != noContext;
-  }
-
-  void fillContext() {
-    if (hasContext()) {
-      fillContext(pLeft.get());
-      fillContext(pRight.get());
-    }
-  }
-
   void print(unsigned depth = 0, Position position = ROOT) {
     std::string pos;
     switch (position) {
@@ -96,7 +92,7 @@ struct ParseNode {
               << depth << ": ";
 
     std::cout << std::setfill(' ')   << std::setw(4) 
-              << context << "["      << indirection << "]" 
+              << name << "["      << indirection << "]" 
               << std::string(4, ' ') << std::string(2*depth, '-') 
               << " "                 << match << std::endl;
 
@@ -123,22 +119,31 @@ struct ParseNode {
   }
 
 private:
-  void fillContext(ParseNode* pNode) {
-    if (pNode && !pNode->hasContext()) {
-      pNode->context = context;
-      pNode->indirection  = indirection + 1;
-      pNode->fillContext();
-    }
-  }
 
 public:
   std::string                match;
-  int                        context;
+  std::string                name;
+
   int                        position;
   int                        indirection;
 
   std::unique_ptr<ParseNode> pLeft;
   std::unique_ptr<ParseNode> pRight;
+
+  std::list<std::unique_ptr<ParseNode>> children;
+};
+
+//------------------------------------------------------------------------------
+
+// A Parselet is anything that takes an iterable and turns it into into an AST node
+template <typename N = ParseNode, typename T = std::string>
+struct Parselet {
+  typedef typename T::iterator                                      Iterator;
+  typedef N                                                         NodeType;
+  typedef std::function<NodeType* (Iterator& begin, Iterator& end)> Parser;
+
+  // Execute the parser and decorate the node with some context
+  virtual NodeType* parse(Iterator& first, Iterator& last) const = 0;
 };
 
 // A Parser is any function that takes string iterators and returns a ParseNode
@@ -146,42 +151,38 @@ public:
 typedef std::function<ParseNode* (StrIt& begin, StrIt& end)> Parser;
 
 // What are rules?
-struct Rule {
+struct Rule : Parselet<ParseNode> {
 
   // The nil Parser is useful for initializing nil rules
+
   static ParseNode* nil(StrIt& begin, StrIt& end) {
     return 0;
   }
 
-  Rule (const Rule& other) 
-  : parse_  (other.parse_) 
-  , context_   (other.context_) 
-  , terminal_  (other.terminal_) {
-  }
-
-  Rule (int context = ParseNode::noContext, bool terminal = false) 
+  Rule (bool terminal = false) 
   : parse_  (nil) 
-  , context_   (-1) 
-  , terminal_  (false) {
+  , terminal_  (false) 
+  , name_ (""){
   }
 
   Rule (const Parser& p) 
   : parse_  (p) 
-  , context_   (-1) 
-  , terminal_  (false) {
+  , terminal_  (false) 
+  , name_ (""){
   }
 
-  Rule (const Parser&& p) 
-  : parse_  (p) 
-  , context_   (-1) 
-  , terminal_  (false) {
+  Rule (const Rule& r, const char* as) 
+  : parse_     (r.parse_) 
+  , terminal_  (r.terminal_)
+  , name_      (as) {
   }
 
+  // Execute the parser and decorate the node with some context
   ParseNode* parse(StrIt& first, StrIt& last) const {
     ParseNode* pNode = parse_(first, last);
     if (pNode) { 
-      pNode->context = context_;
-      pNode->fillContext();
+      pNode->name    = name_;
+
       if (terminal_) {
         pNode->terminate();
       }
@@ -189,38 +190,15 @@ struct Rule {
     return pNode;
   }
 
-  ParseNode* parse(const char* pText) const {
-    std::string temp(pText);
-    auto first = temp.begin();
-    auto last  = temp.end();
-    ParseNode* pNode = parse_(first, last);
-    if (pNode) { 
-      pNode->context = context_;
-      pNode->fillContext();
-      if (terminal_) {
-        pNode->terminate();
-      }
-    }
-    return pNode;
+  // Return a new rule with a name
+  Rule as(const char* name) {
+    return Rule(*this, name);
   }
 
   Parser  parse_;
-  int     context_;
   bool    terminal_;
-};
 
-// NonTerminal rules 
-template <int Tag>
-struct NonTerminal : public Rule {
-  NonTerminal()                                      {Rule::context_ = Tag;}
-  NonTerminal(const Rule& rule) : Rule (rule.parse_) {Rule::context_ = Tag;}
-};
-
-// Terminal rules 
-template <int Tag>
-struct Terminal : public Rule {
-  Terminal()                                      {Rule::context_ = Tag; Rule::terminal_ = true;}
-  Terminal(const Rule& rule) : Rule (rule.parse_) {Rule::context_ = Tag; Rule::terminal_ = true;}
+  const char*  name_;
 };
 
 void error(const std::string& match, const std::string& context) {
@@ -238,7 +216,7 @@ range(char a, char b) {
     if (*first >= a && *first <= b) {
       std::advance(first, 1);
     } else {
-      error(match, "parse");
+      error(match, "range");
     }
     return new ParseNode(match);
   });
@@ -251,7 +229,7 @@ lit(char c) {
     if (*first == c) {
       std::advance(first, 1);
     } else {
-      error(match, "parse");
+      error(match, "lit");
     }
     return new ParseNode(match);
   });
@@ -264,7 +242,7 @@ lit(const std::string& str) {
     if (match == str) {
       std::advance(first, str.length());
     } else {
-      error(match, "parse");
+      error(match, "lit");
     }
     return new ParseNode(match);
   });
@@ -281,7 +259,7 @@ any(const std::string& str) {
       }
     }
 
-    error(match, "parse");
+    error(match, "any");
     return 0;
   });
 };
@@ -296,85 +274,6 @@ skip(char c, char d) {
   });
 }
 
-//------------------------------------------------------------------------------
-// Combinators
-Rule seq(const Rule& a, const Rule& b) {
-  Rule seqRule;
-  seqRule.parse_ = [=](StrIt& first, StrIt& last) -> ParseNode* {
-    auto original = first;
-    try {
-      ParseNode* pNode = new ParseNode(); 
-      pNode->pLeft.reset (a.parse(first, last));
-      pNode->pRight.reset(b.parse(first, last));
-      pNode->match = std::string(original, first);
-      return pNode;
-    }
-    catch (std::exception& e) {
-      first = original;
-      throw;
-    }
-  };
-  return seqRule;
-}
-
-Rule alt(const Rule& a, const Rule& b) {
-  Rule altRule;
-  altRule.parse_ = [=](StrIt& first, StrIt& last) -> ParseNode* {
-    auto original = first;
-    try {
-      ParseNode* pNode = new ParseNode(); 
-      pNode->pLeft.reset(a.parse(first, last));
-      pNode->match = std::string(original, first);
-      return pNode;
-    }
-    catch (std::exception& e) {
-      first = original;
-      ParseNode* pNode = new ParseNode(); 
-      pNode->pRight.reset(b.parse(first, last));
-      pNode->match = std::string(original, first);
-      return pNode;
-    }
-  };
-  return altRule;
-}
-
-// Add a layer of indirection via a lambda
-Rule lazy(const Rule& a) {
-  return Rule([&](StrIt& begin, StrIt& end) -> ParseNode* {
-    //return pA->parse(begin, end);
-    return a.parse(begin, end);
-  });
-}
-
-// maybe
-Rule maybe(const Rule& a) {
-  return alt(a, Rule());
-}
-
-//------------------------------------------------------------------------------
-// operators
-Rule operator+ (const Rule& a, const Rule& b) {
-  return seq(a, b);
-}
-
-Rule operator& (const Rule& a, const Rule& b) {
-  return seq(a, b);
-}
-
-Rule operator| (const Rule& a, const Rule& b) {
-  return alt(a, b);
-}
-
-Rule operator! (const Rule& a) {
-  return lazy(a);
-}
-
-Rule operator~ (const Rule& a) {
-  return maybe(a);
-}
-
-Rule operator* (const Rule& a) {
-  return maybe(lazy(a));
-}
+#include "ParseCombinators.h"
 
 //------------------------------------------------------------------------------
