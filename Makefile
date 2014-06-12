@@ -59,3 +59,9 @@ PRATT_CXXFLAGS    += -Iinc/
 PRATT_LDFLAGS     := -pthread 
 PRATT_SRCS        := src/Pratt.cpp 
 $(eval $(call APPLICATION,pratt))
+
+LEXER_CXXFLAGS    := -std=gnu++0x -O0 -g
+LEXER_CXXFLAGS    += -Iinc/
+LEXER_LDFLAGS     := -pthread 
+LEXER_SRCS        := src/Lexer.cpp 
+$(eval $(call APPLICATION,lexer))

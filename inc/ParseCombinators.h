@@ -79,8 +79,8 @@ RuleType maybe(const RuleType& a) {
 
 // TODO this doesn't work yet...
 template <typename RuleType>
-RuleType repeat(const RuleType& a) {
-  return seq(a, maybe(repeat(a)));
+RuleType some(const RuleType& a) {
+  throw std::runtime_error("unimplemented");
 }
 
 //------------------------------------------------------------------------------
@@ -112,7 +112,7 @@ RuleType operator~ (const RuleType& a) {
 
 template <typename RuleType>
 RuleType operator* (const RuleType& a) {
-  return repeat(a);
+  return many(a);
 }
 
 //------------------------------------------------------------------------------
