@@ -3,6 +3,7 @@
 #include <regex>
 #include <algorithm>
 #include <iostream>
+#include <map>
 
 struct Nil   {};
 
@@ -83,7 +84,7 @@ struct Lexer : public LexerMachine {
     return tokens;
   }
   
-  bool skip() {
+  void skip() {
     while (begin != end && std::isspace(*begin)) { begin++; } 
   }
 
@@ -98,8 +99,55 @@ struct Lexer : public LexerMachine {
 
 int main () {
   std::cout << "Lexer Test" << std::endl;
+  // a+(b|c) 
+  typedef std::string Input;
+  typedef std::string Token;
+  typedef std::string State;
+  typedef std::map<Input, State>       Transitions;
+  typedef std::map<State, Transitions> States;
+  typedef std::tuple<State, States>    Machine;
+
+  auto fsm = States({
+    { "even", {
+      {"\e", "-"},
+      {"0",  "even"}, 
+      {"1",  "odd"},
+      {"\a", "even"},
+    }},
+    { "odd",  {
+      {"\e", "-"},
+      {"1",  "even"},
+      {"0",  "odd"},
+      {"\a", "odd"},
+    }},
+  });
+
+  auto fsm_exec = [](Machine& m, Input input) {
+    auto& state  = std::get<0>(m);
+    auto& states = std::get<1>(m);
+    state = states.at(state).at(input);
+    std::cout << "input = " << input << ", state = " << state << std::endl;
+  };
+
+  auto fsm_accept = [](Machine& m) -> Token {
+    auto& state  = std::get<0>(m);
+    auto& states = std::get<1>(m);
+    return states.at(state).at("\a");
+  };
+
   
   try {
+    Machine m = {"even", fsm};
+    fsm_exec(m, "0");
+    fsm_exec(m, "1");
+    fsm_exec(m, "1");
+    fsm_exec(m, "1");
+    fsm_exec(m, "1");
+    fsm_exec(m, "1");
+    fsm_exec(m, "0");
+    std::cout << " yield = " << fsm_accept(m) << std::endl;
+
+  
     auto text = std::string("if (acb * V), aw: + a34_");
     Lexer lexer(text);
     lexer.transition<Start>();
@@ -107,7 +155,7 @@ int main () {
     for (auto t : tokens) {
       std::cout << "token: " << t << std::endl;
     }
-  } catch (std::runtime_error e) { 
+  } catch (std::exception& e) { 
     std::cout << "error: " << e.what() << std::endl;
   }
 }
