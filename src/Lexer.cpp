@@ -2,10 +2,196 @@
 
 #include <regex>
 #include <algorithm>
+#include <numeric>
 #include <iostream>
+#include <sstream>
 #include <iomanip>
 #include <map>
 #include <list>
+#include <set>
+
+template <typename State>
+std::string stringState(State state); 
+
+template <>
+std::string stringState<std::string>(std::string state) {
+  return state;
+} 
+
+template <>
+std::string stringState<std::set<std::string>>(std::set<std::string> states) {
+  std::string newState = ":";
+  for (auto state : states) {
+    newState += state + ":";
+  }
+  return newState;
+} 
+
+template <typename Input, typename State>
+struct Automata {
+  typedef std::multimap<Input, State>       Transitions;
+  typedef std::map     <State, Transitions> StateChanges;
+  typedef std::set     <State>              States;
+  typedef std::set     <Input>              Inputs;
+  typedef std::set     <State>              AcceptableStates;
+
+  Automata(State initialState, StateChanges changes, AcceptableStates acceptableStates) 
+    : currentState_     (initialState) 
+    , stateChanges_     (changes) 
+    , acceptableStates_ (acceptableStates) {
+  }
+
+  State state() const {
+    return currentState_;
+  }
+
+  StateChanges changes() const {
+    return stateChanges_;
+  }
+
+  States acceptable() const {
+    return acceptableStates_;
+  }
+
+  std::string toString() const {
+    std::stringstream str;
+
+    for (auto s : stateChanges_) {
+      str << "state: " << stringState(s.first) << std::endl;
+      for (auto t : s.second) {
+        str << "\t  on \'"  << t.first  << "\' ";
+        str << "goto " << stringState(t.second) << std::endl;
+      }
+    }
+    str << "acceptable: " << std::endl;
+    for (auto s : acceptableStates_) {
+      str << "\t  " << stringState(s) << std::endl;
+    }
+
+    return str.str();
+  }
+
+  Automata prefix(const std::string& prefix) const {
+    StateChanges states;
+    for (auto s : stateChanges_) {
+      for (auto t : s.second) {
+        states[prefix + s.first].insert(std::make_pair(t.first, prefix + t.second));
+      }
+    }
+    AcceptableStates accept;
+    for (auto a : acceptableStates_) {
+      accept.insert(prefix + a);  
+    }
+    return Automata(prefix  + currentState_, states, accept); 
+  };
+
+
+  Automata<Input, States> realize() {
+    // 1. Create the start state of the DFA by taking the e-closure of the start state 
+    //    of the NFA.
+    // 2. Perform the following for the new DFA state: 
+    //    For each possible input symbol:
+    //    1. Apply move to the newly-created state and the input symbol; this will return 
+    //       a set of states.
+    //    2. Apply the e-closure to this set of states, possibly resulting in a new set.
+    //
+    // This set of NFA states will be a single state in the DFA.
+    // 3. Each time we generate a new DFA state, we must apply step 2 to it. The process 
+    //    is complete when applying step 2 does not yield any new states.
+    // 4. The finish states of the DFA are those which contain any of the finish states 
+    //    of the NFA.
+    typename Automata<Input, States>::StateChanges changes;
+    typename Automata<Input, States>::States       acceptable;
+    auto dfaState     = closure({currentState_}); //TODO initial state isn't current...
+    auto initialState = dfaState;
+
+    std::function<void (States)> simulate = 
+    [&](States state) {
+      changes[state].insert({}); 
+      for (auto i : inputs(state)) {
+        auto newState = closure(move(state, i));
+        if (i != '\0') {
+          changes[state].insert(std::make_pair(i, newState)); 
+          simulate(newState);
+        }
+      }
+    };
+
+    simulate(initialState);
+
+    // acceptable states
+
+    return Automata<Input, States>(initialState, changes, acceptable);
+  }
+
+  Inputs inputs(States states) {
+    Inputs inputStates;
+    
+    for (auto state : states) {
+      auto transitions        = stateChanges_.find(state);
+      if (transitions != stateChanges_.end()) {
+        for (auto transition : transitions->second) {
+          inputStates.insert(transition.first);
+        }
+      }
+    }
+    return inputStates;
+  }
+
+  
+  States closure(States states) {
+    States closureStates = states;
+    // The e-closure function takes a state and returns the set of states reachable 
+    // from it based on (one or more) e-transitions. Note that this will always 
+    // include the state tself. We should be able to get from a state to any state 
+    // in its e-closure without consuming any input.
+    for (auto state : states) {
+      auto transitions        = stateChanges_.find(state);
+      if (transitions != stateChanges_.end()) {
+        auto epsilonTransitions = transitions->second.equal_range('\0');
+        for (auto epsilon  = epsilonTransitions.first; 
+                  epsilon != epsilonTransitions.second;
+                ++epsilon) {
+          if (!closureStates.count(epsilon->second)) {
+            auto nextStates = closure({epsilon->second});
+            closureStates.insert(nextStates.begin(), nextStates.end());
+          }
+        }
+      }
+    }
+
+    return closureStates;
+  }
+
+  
+  States move(States states, Input input) {
+    States moveStates;
+    // The function move takes a state and a character, and returns the set of 
+    // states reachable by one transition on this character.
+    for (auto state : states) {
+      auto transitions = stateChanges_.find(state);
+      if (transitions != stateChanges_.end()) {
+        auto matches     = transitions->second.equal_range(input);
+        for (auto transition  = matches.first; 
+                  transition != matches.second;
+                ++transition) {
+          moveStates.insert(transition->second);
+        }
+      }
+    }
+
+
+    return closure(moveStates);
+  };
+protected:
+
+private:
+  State        currentState_;
+  StateChanges stateChanges_;
+  States       acceptableStates_;
+};
+
+typedef Automata<char, std::string> StringAutomata;
 
 int main () {
   std::cout << "Lexer Test" << std::endl;
@@ -47,67 +233,38 @@ int main () {
     return states.at(state).at("\a");
   };
 
-  auto re_namespace = [](const Nfa& nfa, const std::string& name) -> Nfa {
-    NfaStates states;
-    auto& nstate  = std::get<0>(nfa);
-    auto& nstates = std::get<1>(nfa);
-    auto& naccept = std::get<2>(nfa);
-    for (auto s : nstates) {
-      for (auto t : s.second) {
-        states[name+s.first][t.first] = {};
-        for (auto u : t.second) {
-          states[name+s.first][t.first].push_back(name + u);
-        }
+  auto re_symbol = [](char c) -> StringAutomata {
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { {c,  "1"} } },
+        { "1", { StringAutomata::Transitions({}) } },
       }
-    }
-    std::list<State> accept;
-    for (auto a : naccept) {
-      accept.push_back(name + a);  
-    }
-    return Nfa(name + nstate, states, accept); 
-  };
-
-  auto re_symbol = [](std::string sym) -> Nfa {
-    auto states = NfaStates({
-      { "0", {
-        {sym,  {"1"}}, 
-      }},
-      { "1",  {
-        {},
-      }}
     });
 
-    return Nfa("0", states, {"1"});
+    return StringAutomata("0", states, {"1"});
   };
 
-  auto re_union = [&](const Nfa& a, const Nfa& b) -> Nfa {
-    auto re_a   = re_namespace(a, "a.");
-    auto re_b   = re_namespace(b, "b.");
+  auto re_union = [&](const StringAutomata& a, const StringAutomata& b) -> StringAutomata {
+    auto re_a   = a.prefix("a.");
+    auto re_b   = b.prefix("b.");
 
-    auto& a_state  = std::get<0>(re_a);
-    auto& a_states = std::get<1>(re_a);
-    auto& a_accept = std::get<2>(re_a);
-    auto& b_state  = std::get<0>(re_b);
-    auto& b_states = std::get<1>(re_b);
-    auto& b_accept = std::get<2>(re_b);
+    auto a_state  = re_a.state();
+    auto a_states = re_a.changes();
+    auto a_accept = re_a.acceptable();
+    auto b_state  = re_b.state();
+    auto b_states = re_b.changes();
+    auto b_accept = re_b.acceptable();
 
-    auto states = NfaStates({
-      { "0", {
-        {}, 
-      }},
-      { "1",  {
-        {},
-      }}
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { StringAutomata::Transitions({}) } },
+        { "1", { StringAutomata::Transitions({}) } },
+      }
     });
 
     // Epsilon transitions
-    states["0"][""] = {a_state, b_state};
-    for (auto a : a_accept) {
-      states[a][""] = {"1"};
-    }
-    for (auto b : b_accept) {
-      states[b][""] = {"1"};
-    }
+    states["0"].insert(std::make_pair('\0', a_state));
+    states["0"].insert(std::make_pair('\0', b_state));
 
     // Subexpressions
     for (auto s : a_states) {
@@ -117,77 +274,24 @@ int main () {
       states[s.first] = s.second;
     }
 
-    return Nfa("0", states, {"1"});
-  };
-
-  auto re = re_union(re_symbol("cat"), re_union(re_symbol("dog"), re_symbol("bird")));
-  // print stuff
-  std::cout << "\n\n NFA: " << std::endl;
-  for (auto s : std::get<1>(re)) {
-    std::cout << s.first << std::endl;
-    for (auto t : s.second) {
-      std::cout << "  " << std::setw(6) << t.first << ": ";
-      for (auto d : t.second) {
-          std::cout << d <<  "  " ;
-      }
-      std::cout << std::endl;
+    //  Acceptors
+    for (auto a : a_accept) {
+      states[a].insert(std::make_pair('\0', "1"));
     }
-  }
-  
-  // http://www.cs.may.ie/staff/jpower/Courses/Previous/parsing/node9.html
-  auto closure = [](const Nfa& nfa, const State& state) -> std::list<State> {
-    std::list<State> states;
-    const auto& nstate  = std::get<0>(nfa);
-    const auto& nstates = std::get<1>(nfa);
-    const auto& naccept = std::get<2>(nfa);
-    // The e-closure function takes a state and returns the set of states reachable 
-    // from it based on (one or more) e-transitions. Note that this will always 
-    // include the state tself. We should be able to get from a state to any state 
-    // in its e-closure without consuming any input.
-    states.push_back(state);
-    auto state_transitions = std::get<1>(nfa)[state];
-    return states;
-  };
-
-  auto move = [](const Nfa& nfa, const State& state, Input input) -> std::list<State> {
-    std::list<State> states;
-    // The function move takes a state and a character, and returns the set of 
-    // states reachable by one transition on this character.
-
-    return states;
-  };
-
-  auto nfa_to_dfa = [](const Nfa& nfa) -> Dfa {
-    Dfa dfa;
-    // 1. Create the start state of the DFA by taking the e-closure of the start state 
-    //    of the NFA.
-    // 2. Perform the following for the new DFA state: 
-    //    For each possible input symbol:
-    //    1. Apply move to the newly-created state and the input symbol; this will return 
-    //       a set of states.
-    //    2. Apply the e-closure to this set of states, possibly resulting in a new set.
-    //
-    // This set of NFA states will be a single state in the DFA.
-    // 3. Each time we generate a new DFA state, we must apply step 2 to it. The process 
-    //    is complete when applying step 2 does not yield any new states.
-    // 4. The finish states of the DFA are those which contain any of the finish states 
-    //    of the NFA.
-
-    return dfa;
-  };
-
-  auto re_dfa = nfa_to_dfa(re);
-  std::cout << "\n\n DFA: " << std::endl;
-  for (auto s : std::get<1>(re_dfa)) {
-    std::cout << s.first << std::endl;
-    for (auto t : s.second) {
-      std::cout << "  " << std::setw(6) << t.first << ": ";
-      for (auto d : t.second) {
-          std::cout << d <<  "  " ;
-      }
-      std::cout << std::endl;
+    for (auto b : b_accept) {
+      states[b].insert(std::make_pair('\0', "1"));
     }
-  }
+
+    return StringAutomata("0", states, {"1"});
+  };
+
+  auto re = re_union(re_symbol('a'), re_union(re_symbol('b'), re_symbol('c')));
+  //auto re = re_union(re_symbol('a'), re_symbol('b'));
+  //auto re = re_symbol('a');
+
+  std::cout << re.toString() << std::endl;
+  std::cout << std::endl;
+  std::cout << re.realize().toString() << std::endl;
 
   try {
   /*
