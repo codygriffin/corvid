@@ -1,5 +1,3 @@
-#include "StateMachine.h"
-
 #include <regex>
 #include <algorithm>
 #include <numeric>
@@ -64,19 +62,24 @@ struct Automata {
   States acceptable() const {
     return acceptableStates_;
   }
+
+  void reset() {
+    currentState_ = initialState_;
+  }
   
-  void exec(Input input) {
+  bool exec(Input input) {
     auto transition = stateChanges_.at(currentState_);
     if (transition.count(input) > 1) {
       throw std::runtime_error("need to realize NFA");
     }
+
     if (transition.count(input) == 0) {
-      throw std::runtime_error("illegal state transition");
+      return false;
     }
+
     auto newState = transition.find(input);
-    if (newState != transition.end()) {
-      currentState_ = newState->second;
-    }
+    currentState_ = newState->second;
+    return true;
   };
 
   bool accept () {
@@ -217,6 +220,22 @@ auto re_symbol = [](char c) -> StringAutomata {
       { "1", { StringAutomata::Transitions({}) } },
     }
   });
+
+  return StringAutomata("0", states, {"1"});
+};
+
+auto re_range = [](char a, char b) -> StringAutomata {
+  char min_a = std::min(a, b);
+  char max_b = std::max(a, b);
+  auto states = StringAutomata::StateChanges({
+    {
+      { "1", { StringAutomata::Transitions({}) } },
+    }
+  });
+
+  for (; min_a <= max_b; min_a++) {
+    states["0"].insert(std::make_pair(min_a, "1"));
+  }
 
   return StringAutomata("0", states, {"1"});
 };
@@ -367,29 +386,19 @@ StringAutomata match(char c) {
   return re_symbol(c);
 }
 
-StringAutomata range(char a, char b) {
-  char min_a = std::min(a, b);
-  char max_b = std::max(a, b);
-  StringAutomata automata = re_symbol(min_a);
-  while (++min_a <= max_b) {
-    automata = automata | re_symbol(min_a);
-  }
-  return automata;
-}
-
 int main () {
   std::cout << "Lexer Test" << std::endl;
 
   try {
     //auto re        = *(match("cat") | re_symbol('b') | (re_symbol('c') + re_symbol('d')));
     auto skip        = re_symbol(' ') | re_symbol('\n') | re_symbol('\t');
-    auto digit       = range('0', '9');
-    auto lower       = range('a', 'z');
-    auto upper       = range('A', 'Z');
+    auto digit       = re_range('0', '9');
+    auto lower       = re_range('a', 'z');
+    auto upper       = re_range('A', 'Z');
     auto alpha       = lower | upper;
     auto alphanum    = alpha | digit;
     auto integer     = digit + *digit;
-    auto identifier  = alpha + *(alpha | digit);
+    auto identifier  = alpha + *(alphanum);
     auto kw_if       = match("if");
     auto kw_while    = match("while");
     auto oparen      = match('(');
@@ -413,7 +422,7 @@ int main () {
     //std::cout << re.toString() << std::endl;
     std::cout << "realizing...";
     std::cout.flush();
-    auto re_dfa  = (*re).realize();
+    auto re_dfa  = re.realize();
     std::cout << "done." << std::endl;
 
     //std::cout << "#----- NFA" << std::endl;
@@ -424,10 +433,15 @@ int main () {
     std::cout << "done." << std::endl;
 
     std::string test = "if (cat) { dog bird 1234 }";
-    for (auto c : test) {
-      re_dfa.exec(c); 
-      if (re_dfa.accept()) {
-        std::cout << std::to_string(re_dfa.state().size()) << std::endl;
+    auto lexeme_start = test.begin();
+    for (auto c = test.begin(); c != test.end(); c++) {
+      if (!re_dfa.exec(*c))  {
+        if (re_dfa.accept()) {
+          std::cout << "lexeme - " << std::string(lexeme_start, c) << std::endl;
+          re_dfa.reset();
+          lexeme_start = c;
+          c--;
+        }
       }
     }
     //re_dfa.exec('d');
