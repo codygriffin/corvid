@@ -42,6 +42,13 @@ struct Automata {
     , acceptableStates_ (acceptableStates) {
   }
 
+  Automata() 
+    : currentState_     ("") 
+    , initialState_     ("") 
+    , stateChanges_     ({}) 
+    , acceptableStates_ ({}) {
+  }
+
   State state() const {
     return currentState_;
   }
@@ -57,7 +64,7 @@ struct Automata {
   States acceptable() const {
     return acceptableStates_;
   }
-
+  
   void exec(Input input) {
     auto transition = stateChanges_.at(currentState_);
     if (transition.count(input) > 1) {
@@ -108,21 +115,8 @@ struct Automata {
     return Automata(prefix  + initialState_, states, accept); 
   };
 
-
+  // Really effin' slow right now
   Automata<Input, States> realize() const {
-    // 1. Create the start state of the DFA by taking the e-closure of the start state 
-    //    of the NFA.
-    // 2. Perform the following for the new DFA state: 
-    //    For each possible input symbol:
-    //    1. Apply move to the newly-created state and the input symbol; this will return 
-    //       a set of states.
-    //    2. Apply the e-closure to this set of states, possibly resulting in a new set.
-    //
-    // This set of NFA states will be a single state in the DFA.
-    // 3. Each time we generate a new DFA state, we must apply step 2 to it. The process 
-    //    is complete when applying step 2 does not yield any new states.
-    // 4. The finish states of the DFA are those which contain any of the finish states 
-    //    of the NFA.
     typename Automata<Input, States>::StateChanges changes;
     typename Automata<Input, States>::States       acceptable;
     auto dfaState     = closure({initialState_}); 
@@ -168,14 +162,9 @@ struct Automata {
     }
     return inputStates;
   }
-
   
   States closure(States states) const {
     States closureStates = states;
-    // The e-closure function takes a state and returns the set of states reachable 
-    // from it based on (one or more) e-transitions. Note that this will always 
-    // include the state tself. We should be able to get from a state to any state 
-    // in its e-closure without consuming any input.
     for (auto state : states) {
       auto transitions        = stateChanges_.find(state);
       if (transitions != stateChanges_.end()) {
@@ -197,8 +186,6 @@ struct Automata {
   
   States move(States states, Input input) const {
     States moveStates;
-    // The function move takes a state and a character, and returns the set of 
-    // states reachable by one transition on this character.
     for (auto state : states) {
       auto transitions = stateChanges_.find(state);
       if (transitions != stateChanges_.end()) {
@@ -211,10 +198,8 @@ struct Automata {
       }
     }
 
-
     return closure(moveStates);
   };
-protected:
 
 private:
   State        currentState_;
@@ -268,6 +253,40 @@ auto re_union = [&](const StringAutomata& a, const StringAutomata& b) -> StringA
   }
 
   return StringAutomata("0", states, {"1"});
+};
+
+auto re_choice = [&](const StringAutomata& a, const StringAutomata& b) -> StringAutomata {
+  auto re_a   = a.prefix("a.");
+  auto re_b   = b.prefix("b.");
+
+  auto states = StringAutomata::StateChanges({
+    {
+      { "0", { StringAutomata::Transitions({}) } },
+    }
+  });
+
+  // Epsilon transitions
+  states["0"].insert(std::make_pair('\0', re_a.initial()));
+  states["0"].insert(std::make_pair('\0', re_b.initial()));
+
+  // Subexpressions
+  for (auto s : re_a.changes()) {
+    states[s.first] = s.second;
+  }
+  for (auto s : re_b.changes()) {
+    states[s.first] = s.second;
+  }
+
+  auto acceptable = StringAutomata::States({});
+  for (auto a : re_a.acceptable()) {
+    acceptable.insert(a);
+  }
+
+  for (auto b : re_b.acceptable()) {
+    acceptable.insert(b);
+  }
+
+  return StringAutomata("0", states, acceptable);
 };
 
 auto re_concat = [&](const StringAutomata& a, const StringAutomata& b) -> StringAutomata {
@@ -328,6 +347,10 @@ StringAutomata operator| (const StringAutomata& a, const StringAutomata& b) {
   return re_union(a,b);
 }
 
+StringAutomata operator>> (const StringAutomata& a, const StringAutomata& b) {
+  return re_choice(a,b);
+}
+
 StringAutomata operator* (const StringAutomata& a) {
   return re_star(a);
 }
@@ -340,23 +363,79 @@ StringAutomata match(const std::string& str) {
   return automata;
 }
 
+StringAutomata match(char c) {
+  return re_symbol(c);
+}
+
+StringAutomata range(char a, char b) {
+  char min_a = std::min(a, b);
+  char max_b = std::max(a, b);
+  StringAutomata automata = re_symbol(min_a);
+  while (++min_a <= max_b) {
+    automata = automata | re_symbol(min_a);
+  }
+  return automata;
+}
+
 int main () {
   std::cout << "Lexer Test" << std::endl;
 
   try {
-    auto re     = *(match("cat") | re_symbol('b') | (re_symbol('c') + re_symbol('d')));
-    auto re_dfa = re.realize();
+    //auto re        = *(match("cat") | re_symbol('b') | (re_symbol('c') + re_symbol('d')));
+    auto skip        = re_symbol(' ') | re_symbol('\n') | re_symbol('\t');
+    auto digit       = range('0', '9');
+    auto lower       = range('a', 'z');
+    auto upper       = range('A', 'Z');
+    auto alpha       = lower | upper;
+    auto alphanum    = alpha | digit;
+    auto integer     = digit + *digit;
+    auto identifier  = alpha + *(alpha | digit);
+    auto kw_if       = match("if");
+    auto kw_while    = match("while");
+    auto oparen      = match('(');
+    auto cparen      = match(')');
+    auto obrack      = match('[');
+    auto cbrack      = match(']');
+    auto obrace      = match('{');
+    auto cbrace      = match('}');
+    
+    auto re      = skip 
+                >> oparen
+                >> cparen
+                >> obrace
+                >> cbrace
+                >> obrack
+                >> cbrack
+                >> identifier
+                >> integer;
 
-    std::cout << re.toString() << std::endl;
-    std::cout << re_dfa.toString() << std::endl;
-    re_dfa.exec('b');
-    re_dfa.exec('c');
-    re_dfa.exec('d');
-    re_dfa.exec('c');
-    re_dfa.exec('d');
-    if (!re_dfa.accept()) {
-      throw std::runtime_error("not an acceptable state");
+    //std::cout << "#----- DFA" << std::endl;
+    //std::cout << re.toString() << std::endl;
+    std::cout << "realizing...";
+    std::cout.flush();
+    auto re_dfa  = (*re).realize();
+    std::cout << "done." << std::endl;
+
+    //std::cout << "#----- NFA" << std::endl;
+    //std::cout << re_dfa.toString() << std::endl;
+
+    std::cout << "minimizing...";
+    std::cout << "TO BE IMPLEMENTED...";
+    std::cout << "done." << std::endl;
+
+    std::string test = "if (cat) { dog bird 1234 }";
+    for (auto c : test) {
+      re_dfa.exec(c); 
+      if (re_dfa.accept()) {
+        std::cout << std::to_string(re_dfa.state().size()) << std::endl;
+      }
     }
+    //re_dfa.exec('d');
+    //re_dfa.exec('o');
+    //re_dfa.exec('g');
+    //if (!re_dfa.accept()) {
+    //  throw std::runtime_error("not an acceptable state");
+    //}
   } catch (std::exception& e) { 
     std::cout << "error: " << e.what() << std::endl;
   }

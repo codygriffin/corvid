@@ -25,6 +25,8 @@
 #  SOFTWARE.
 #
 
+#CXX     := /usr/local/bin/g++-4.9
+
 all::
 .PHONY: all
 
@@ -60,7 +62,7 @@ PRATT_LDFLAGS     := -pthread
 PRATT_SRCS        := src/Pratt.cpp 
 $(eval $(call APPLICATION,pratt))
 
-LEXER_CXXFLAGS    := -std=gnu++0x -O0 -g
+LEXER_CXXFLAGS    := -std=gnu++0x -O3 -g
 LEXER_CXXFLAGS    += -Iinc/
 LEXER_LDFLAGS     := -pthread 
 LEXER_SRCS        := src/Lexer.cpp 
