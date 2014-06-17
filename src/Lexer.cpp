@@ -25,13 +25,15 @@ std::string stringState<std::set<std::string>>(std::set<std::string> states) {
   return newState;
 } 
 
-template <typename Input, typename State>
+template <typename Input, typename S>
 struct Automata {
+  typedef S                                 State;
   typedef std::multimap<Input, State>       Transitions;
   typedef std::map     <State, Transitions> StateChanges;
   typedef std::set     <State>              States;
   typedef std::set     <Input>              Inputs;
   typedef std::set     <State>              AcceptableStates;
+  typedef std::function<std::string(Automata&)>    Action;
 
   Automata(State initialState, StateChanges changes, AcceptableStates acceptableStates) 
     : currentState_     (initialState) 
@@ -82,10 +84,14 @@ struct Automata {
     return true;
   };
 
-  bool accept () {
-    return acceptableStates_.count(currentState_) > 0;
-  };
+  bool accept() {
+    if (acceptableStates_.count(currentState_) > 0) {
+      return true;
+    }
 
+    return false;
+  };
+  
   std::string toString() const {
     std::stringstream str;
 
@@ -115,6 +121,7 @@ struct Automata {
     for (auto a : acceptableStates_) {
       accept.insert(prefix + a);  
     }
+
     return Automata(prefix  + initialState_, states, accept); 
   };
 
@@ -185,7 +192,6 @@ struct Automata {
 
     return closureStates;
   }
-
   
   States move(States states, Input input) const {
     States moveStates;
@@ -213,210 +219,262 @@ private:
 
 typedef Automata<char, std::string> StringAutomata;
 
-auto re_symbol = [](char c) -> StringAutomata {
-  auto states = StringAutomata::StateChanges({
-    {
-      { "0", { {c,  "1"} } },
-      { "1", { StringAutomata::Transitions({}) } },
+struct Regex : public StringAutomata {
+
+  static Regex symbol(char c) {
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { {c,  "1"} } },
+        { "1", { StringAutomata::Transitions({}) } },
+      }
+    });
+
+    return Regex("0", states, {"1"});
+  };
+
+  static Regex range(char a, char b) {
+    char min_a = std::min(a, b);
+    char max_b = std::max(a, b);
+    auto states = StringAutomata::StateChanges({
+      {
+        { "1", { StringAutomata::Transitions({}) } },
+      }
+    });
+
+    for (; min_a <= max_b; min_a++) {
+      states["0"].insert(std::make_pair(min_a, "1"));
     }
-  });
 
-  return StringAutomata("0", states, {"1"});
-};
+    return Regex("0", states, {"1"});
+  };
 
-auto re_range = [](char a, char b) -> StringAutomata {
-  char min_a = std::min(a, b);
-  char max_b = std::max(a, b);
-  auto states = StringAutomata::StateChanges({
-    {
-      { "1", { StringAutomata::Transitions({}) } },
+  static Regex alt(const Regex& a, const Regex& b) {
+    auto re_a   = a.prefix("a.");
+    auto re_b   = b.prefix("b.");
+
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { StringAutomata::Transitions({}) } },
+        { "1", { StringAutomata::Transitions({}) } },
+      }
+    });
+
+    // Epsilon transitions
+    states["0"].insert(std::make_pair('\0', re_a.initial()));
+    states["0"].insert(std::make_pair('\0', re_b.initial()));
+
+    // Subexpressions
+    for (auto s : re_a.changes()) {
+      states[s.first] = s.second;
     }
-  });
-
-  for (; min_a <= max_b; min_a++) {
-    states["0"].insert(std::make_pair(min_a, "1"));
-  }
-
-  return StringAutomata("0", states, {"1"});
-};
-
-auto re_union = [&](const StringAutomata& a, const StringAutomata& b) -> StringAutomata {
-  auto re_a   = a.prefix("a.");
-  auto re_b   = b.prefix("b.");
-
-  auto states = StringAutomata::StateChanges({
-    {
-      { "0", { StringAutomata::Transitions({}) } },
-      { "1", { StringAutomata::Transitions({}) } },
+    for (auto s : re_b.changes()) {
+      states[s.first] = s.second;
     }
-  });
 
-  // Epsilon transitions
-  states["0"].insert(std::make_pair('\0', re_a.initial()));
-  states["0"].insert(std::make_pair('\0', re_b.initial()));
-
-  // Subexpressions
-  for (auto s : re_a.changes()) {
-    states[s.first] = s.second;
-  }
-  for (auto s : re_b.changes()) {
-    states[s.first] = s.second;
-  }
-
-  //  Acceptors
-  for (auto a : re_a.acceptable()) {
-    states[a].insert(std::make_pair('\0', "1"));
-  }
-  for (auto b : re_b.acceptable()) {
-    states[b].insert(std::make_pair('\0', "1"));
-  }
-
-  return StringAutomata("0", states, {"1"});
-};
-
-auto re_choice = [&](const StringAutomata& a, const StringAutomata& b) -> StringAutomata {
-  auto re_a   = a.prefix("a.");
-  auto re_b   = b.prefix("b.");
-
-  auto states = StringAutomata::StateChanges({
-    {
-      { "0", { StringAutomata::Transitions({}) } },
+    //  Acceptors
+    for (auto a : re_a.acceptable()) {
+      states[a].insert(std::make_pair('\0', "1"));
     }
-  });
-
-  // Epsilon transitions
-  states["0"].insert(std::make_pair('\0', re_a.initial()));
-  states["0"].insert(std::make_pair('\0', re_b.initial()));
-
-  // Subexpressions
-  for (auto s : re_a.changes()) {
-    states[s.first] = s.second;
-  }
-  for (auto s : re_b.changes()) {
-    states[s.first] = s.second;
-  }
-
-  auto acceptable = StringAutomata::States({});
-  for (auto a : re_a.acceptable()) {
-    acceptable.insert(a);
-  }
-
-  for (auto b : re_b.acceptable()) {
-    acceptable.insert(b);
-  }
-
-  return StringAutomata("0", states, acceptable);
-};
-
-auto re_concat = [&](const StringAutomata& a, const StringAutomata& b) -> StringAutomata {
-  auto re_a   = a.prefix("a.");
-  auto re_b   = b.prefix("b.");
-
-  auto a_states = re_a.changes();
-  auto b_states = re_b.changes();
-
-  auto states = StringAutomata::StateChanges({}); 
-  states.insert(a_states.begin(), a_states.end());
-  states.insert(b_states.begin(), b_states.end());
-
-  for (auto a : re_a.acceptable()) {
-    states[a].insert(std::make_pair('\0', re_b.initial()));
-  }
-
-  for (auto b : re_b.acceptable()) {
-    states[b].insert(std::make_pair('\0', "1"));
-  }
-
-  return StringAutomata(re_a.initial(), states, {"1"});
-};
-
-auto re_star = [&](const StringAutomata& a) -> StringAutomata {
-  auto re_a   = a.prefix("a.");
-
-  auto states = StringAutomata::StateChanges({
-    {
-      { "0", { StringAutomata::Transitions({}) } },
-      { "1", { StringAutomata::Transitions({}) } },
+    for (auto b : re_b.acceptable()) {
+      states[b].insert(std::make_pair('\0', "1"));
     }
-  });
 
-  // Epsilon transitions
-  states["0"].insert(std::make_pair('\0', re_a.initial()));
-  states["0"].insert(std::make_pair('\0', "1"));
+    return Regex("0", states, {"1"});
+  };
 
-  // Subexpressions
-  for (auto s : re_a.changes()) {
-    states[s.first] = s.second;
+  static Regex seq(const Regex& a, const Regex& b) {
+    auto re_a   = a.prefix("a.");
+    auto re_b   = b.prefix("b.");
+
+    auto a_states = re_a.changes();
+    auto b_states = re_b.changes();
+
+    auto states = StringAutomata::StateChanges({}); 
+    states.insert(a_states.begin(), a_states.end());
+    states.insert(b_states.begin(), b_states.end());
+
+    for (auto a : re_a.acceptable()) {
+      states[a].insert(std::make_pair('\0', re_b.initial()));
+    }
+
+    for (auto b : re_b.acceptable()) {
+      states[b].insert(std::make_pair('\0', "1"));
+    }
+
+    return Regex(re_a.initial(), states, {"1"});
+  };
+
+  static Regex many(const Regex& a) {
+    auto re_a   = a.prefix("a.");
+
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { StringAutomata::Transitions({}) } },
+        { "1", { StringAutomata::Transitions({}) } },
+      }
+    });
+
+    // Epsilon transitions
+    states["0"].insert(std::make_pair('\0', re_a.initial()));
+    states["0"].insert(std::make_pair('\0', "1"));
+
+    // Subexpressions
+    for (auto s : re_a.changes()) {
+      states[s.first] = s.second;
+    }
+
+    //  Acceptors
+    for (auto a : re_a.acceptable()) {
+      states[a].insert(std::make_pair('\0', "1"));
+      states[a].insert(std::make_pair('\0', re_a.initial()));
+    }
+
+    return Regex("0", states, {"1"});
+  };
+
+  static Regex match(const std::string& str) {
+    Regex automata = Regex::symbol(str[0]);
+    for (size_t i = 1; i < str.length(); i++) {
+      automata = Regex::seq(automata, Regex::symbol(str[i]));
+    }
+    return automata;
   }
 
-  //  Acceptors
-  for (auto a : re_a.acceptable()) {
-    states[a].insert(std::make_pair('\0', "1"));
-    states[a].insert(std::make_pair('\0', re_a.initial()));
+  static Regex match(char c) {
+    return Regex::symbol(c);
   }
 
-  return StringAutomata("0", states, {"1"});
+private:
+  Regex(StringAutomata::State initialState, StringAutomata::StateChanges changes, StringAutomata::AcceptableStates acceptableStates) 
+    : StringAutomata(initialState, changes, acceptableStates) {
+  }
 };
 
-StringAutomata operator+ (const StringAutomata& a, const StringAutomata& b) {
-  return re_concat(a,b);
-}
 
-StringAutomata operator| (const StringAutomata& a, const StringAutomata& b) {
-  return re_union(a,b);
-}
+// Flatten this out (like range)
+template <typename Token>
+struct Lexer : public StringAutomata {
+  static Lexer tokens(const StringAutomata& a, const StringAutomata& b) {
+    auto re_a   = a.prefix("a.");
+    auto re_b   = b.prefix("b.");
 
-StringAutomata operator>> (const StringAutomata& a, const StringAutomata& b) {
-  return re_choice(a,b);
-}
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { StringAutomata::Transitions({}) } },
+      }
+    });
 
-StringAutomata operator* (const StringAutomata& a) {
-  return re_star(a);
-}
+    // Epsilon transitions
+    states["0"].insert(std::make_pair('\0', re_a.initial()));
+    states["0"].insert(std::make_pair('\0', re_b.initial()));
 
-StringAutomata match(const std::string& str) {
-  StringAutomata automata = re_symbol(str[0]);
-  for (size_t i = 1; i < str.length(); i++) {
-    automata = automata + re_symbol(str[i]);
+    // Subexpressions
+    for (auto s : re_a.changes()) {
+      states[s.first] = s.second;
+    }
+    for (auto s : re_b.changes()) {
+      states[s.first] = s.second;
+    }
+
+    auto acceptable = StringAutomata::States({});
+    for (auto a : re_a.acceptable()) {
+      acceptable.insert(a);
+    }
+
+    for (auto b : re_b.acceptable()) {
+      acceptable.insert(b);
+    }
+
+    return Lexer("0", states, acceptable);
   }
-  return automata;
+
+  static Lexer tokens(const std::list<std::pair<Token, StringAutomata>>& patterns) {
+    auto states = StringAutomata::StateChanges({
+      {
+        { "0", { StringAutomata::Transitions({}) } },
+      }
+    });
+
+    auto acceptable = StringAutomata::States({
+    });
+
+    int i = 1;
+    for (auto p : patterns) {
+      auto re_a   = p.second.prefix(p.first + ".");
+
+      // Epsilon transitions
+      states["0"].insert(std::make_pair('\0', re_a.initial()));
+
+      for (auto s : re_a.changes())    { states[s.first] = s.second; }
+      for (auto a : re_a.acceptable()) { acceptable.insert(a); }
+    }
+
+    return Lexer("0", states, acceptable);
+  }
+  
+private:
+  Lexer(StringAutomata::State initialState, 
+        StringAutomata::StateChanges changes, 
+        StringAutomata::AcceptableStates acceptableStates) 
+    : StringAutomata(initialState, changes, acceptableStates) {
+  }
+};
+
+Regex operator+ (const Regex& a, const Regex& b) {
+  return Regex::seq(a,b);
 }
 
-StringAutomata match(char c) {
-  return re_symbol(c);
+Regex operator| (const Regex& a, const Regex& b) {
+  return Regex::alt(a,b);
 }
+
+Regex operator* (const Regex& a) {
+  return Regex::many(a);
+}
+
+//template <typename T>
+//Lexer operator >> (const StringAutomata& a, const StringAutomata& b) {
+//  return Lexer<T>::tokens(a,b);
+//}
 
 int main () {
   std::cout << "Lexer Test" << std::endl;
 
+  auto skip        = Regex::symbol(' ') | Regex::symbol('\n') | Regex::symbol('\t');
+  auto digit       = Regex::range('0', '9');
+  auto lower       = Regex::range('a', 'z');
+  auto upper       = Regex::range('A', 'Z');
+  auto alpha       = lower | upper;
+  auto alphanum    = alpha | digit;
+  auto number      = digit + *digit;
+  auto identifier  = alpha + *(alphanum);
+
   try {
-    //auto re        = *(match("cat") | re_symbol('b') | (re_symbol('c') + re_symbol('d')));
-    auto skip        = re_symbol(' ') | re_symbol('\n') | re_symbol('\t');
-    auto digit       = re_range('0', '9');
-    auto lower       = re_range('a', 'z');
-    auto upper       = re_range('A', 'Z');
-    auto alpha       = lower | upper;
-    auto alphanum    = alpha | digit;
-    auto integer     = digit + *digit;
-    auto identifier  = alpha + *(alphanum);
-    auto kw_if       = match("if");
-    auto kw_while    = match("while");
-    auto oparen      = match('(');
-    auto cparen      = match(')');
-    auto obrack      = match('[');
-    auto cbrack      = match(']');
-    auto obrace      = match('{');
-    auto cbrace      = match('}');
-    
-    auto re      = skip 
-                >> oparen
-                >> cparen
-                >> obrace
-                >> cbrace
-                >> obrack
-                >> cbrack
-                >> identifier
-                >> integer;
+    auto re = Lexer<std::string>::tokens({
+    {"",            skip},
+    {"ID",          identifier},
+    {"SYM",         Regex::match(":") + identifier},
+    {"NUM",         number},
+    {"IF",          Regex::match("if")},
+    {"WHILE",       Regex::match("while")},
+    {"UNTIL",       Regex::match("until")},
+    {"LOOP",        Regex::match("loop")},
+    {"WHEN",        Regex::match("when")},
+    {"DO",          Regex::match("do")},
+    {"VAL",         Regex::match("val")},
+    {"LET",         Regex::match("let")},
+    {"OPAREN",      Regex::match('(')},
+    {"CPAREN",      Regex::match(')')},
+    {"OBRACK",      Regex::match('[')},
+    {"CBRACK",      Regex::match(']')},
+    {"OBRACE",      Regex::match('{')},
+    {"CBRACE",      Regex::match('}')},
+    {"EQUAL",       Regex::match('=')},
+    {"PLUS",        Regex::match('+')},
+    {"SEMI",        Regex::match(';')},
+    {"COLON",       Regex::match(':')},
+    {"YIELDS",      Regex::match("->")},
+    });
 
     //std::cout << "#----- DFA" << std::endl;
     //std::cout << re.toString() << std::endl;
@@ -432,24 +490,49 @@ int main () {
     std::cout << "TO BE IMPLEMENTED...";
     std::cout << "done." << std::endl;
 
-    std::string test = "if (cat) { dog bird 1234 }";
+    std::string test = 
+      "let add2 = (a : u8) -> u8{\n"
+      "  1 + 1\n"
+      "};\n"
+      "\n"
+      "val abcd = :abcd;\n";
     auto lexeme_start = test.begin();
-    for (auto c = test.begin(); c != test.end(); c++) {
+    std::string::iterator c;
+    for (c = test.begin(); c != test.end(); c++) {
       if (!re_dfa.exec(*c))  {
+        std::string state = stringState(re_dfa.state());
+        auto dot   = state.find('.');
+        auto token = state = state.substr(1, dot-1);
         if (re_dfa.accept()) {
-          std::cout << "lexeme - " << std::string(lexeme_start, c) << std::endl;
+          if (token != "") {
+            std::cout << " lexeme - " << std::string(lexeme_start, c)
+                      << " token  - " << token << std::endl;
+          }
           re_dfa.reset();
           lexeme_start = c;
           c--;
         }
+        else {
+          std::runtime_error("bad token"); 
+        }
       }
     }
-    //re_dfa.exec('d');
-    //re_dfa.exec('o');
-    //re_dfa.exec('g');
-    //if (!re_dfa.accept()) {
-    //  throw std::runtime_error("not an acceptable state");
-    //}
+
+    // One last time
+    std::string state = stringState(re_dfa.state());
+    auto dot   = state.find('.');
+    auto token = state = state.substr(1, dot-1);
+    if (re_dfa.accept()) {
+      if (token != "") {
+        std::cout << " lexeme - " << std::string(lexeme_start, c)
+                  << " token  - " << token << std::endl;
+      } 
+      re_dfa.reset();
+      lexeme_start = c;
+      c--;
+    } else {  
+      std::runtime_error("bad token");
+    }
   } catch (std::exception& e) { 
     std::cout << "error: " << e.what() << std::endl;
   }
