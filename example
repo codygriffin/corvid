@@ -1,0 +1,14 @@
+template (i8 N)
+type fib = {
+  i8 value = fib(N)::value + fib(N-1)::value;
+}
+
+type fib(0) = {
+  i8 value = 1;
+}
+
+type fib(1) = {
+  i8 value = 1;
+}
+
+print fib(4)::value;

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <numeric>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <map>
@@ -27,13 +28,14 @@ std::string stringState<std::set<std::string>>(std::set<std::string> states) {
 
 template <typename Input, typename S>
 struct Automata {
-  typedef S                                 State;
-  typedef std::multimap<Input, State>       Transitions;
-  typedef std::map     <State, Transitions> StateChanges;
-  typedef std::set     <State>              States;
-  typedef std::set     <Input>              Inputs;
-  typedef std::set     <State>              AcceptableStates;
+  typedef S                                        State;
+  typedef std::multimap<Input, State>              Transitions;
+  typedef std::map     <State, Transitions>        StateChanges;
+  typedef std::set     <State>                     States;
+  typedef std::set     <Input>                     Inputs;
+  typedef std::set     <State>                     AcceptableStates;
   typedef std::function<std::string(Automata&)>    Action;
+  typedef Automata<Input, States>                  Realized;
 
   Automata(State initialState, StateChanges changes, AcceptableStates acceptableStates) 
     : currentState_     (initialState) 
@@ -125,7 +127,6 @@ struct Automata {
     return Automata(prefix  + initialState_, states, accept); 
   };
 
-  // Really effin' slow right now
   Automata<Input, States> realize() const {
     typename Automata<Input, States>::StateChanges changes;
     typename Automata<Input, States>::States       acceptable;
@@ -350,43 +351,10 @@ private:
   }
 };
 
-
-// Flatten this out (like range)
-template <typename Token>
-struct Lexer : public StringAutomata {
-  static Lexer tokens(const StringAutomata& a, const StringAutomata& b) {
-    auto re_a   = a.prefix("a.");
-    auto re_b   = b.prefix("b.");
-
-    auto states = StringAutomata::StateChanges({
-      {
-        { "0", { StringAutomata::Transitions({}) } },
-      }
-    });
-
-    // Epsilon transitions
-    states["0"].insert(std::make_pair('\0', re_a.initial()));
-    states["0"].insert(std::make_pair('\0', re_b.initial()));
-
-    // Subexpressions
-    for (auto s : re_a.changes()) {
-      states[s.first] = s.second;
-    }
-    for (auto s : re_b.changes()) {
-      states[s.first] = s.second;
-    }
-
-    auto acceptable = StringAutomata::States({});
-    for (auto a : re_a.acceptable()) {
-      acceptable.insert(a);
-    }
-
-    for (auto b : re_b.acceptable()) {
-      acceptable.insert(b);
-    }
-
-    return Lexer("0", states, acceptable);
-  }
+template <typename Token = std::string>
+struct Lexer {
+  typedef StringAutomata::Realized LexerAutomata;
+  typedef std::string              Lexeme;
 
   static Lexer tokens(const std::list<std::pair<Token, StringAutomata>>& patterns) {
     auto states = StringAutomata::StateChanges({
@@ -411,14 +379,95 @@ struct Lexer : public StringAutomata {
 
     return Lexer("0", states, acceptable);
   }
+
+  void printTokens(const std::string& str) {
+    auto lexeme_start = str.begin();
+    std::string::const_iterator c;
+    for (c = str.begin(); c != str.end(); c++) {
+      if (!automata_.exec(*c))  {
+        std::string state = stringState(automata_.state());
+        auto dot   = state.find('.');
+        auto token = state = state.substr(1, dot-1);
+        if (automata_.accept()) {
+          if (token != "") {
+            std::cout << " lexeme - " << std::string(lexeme_start, c)
+                      << " token  - " << token << std::endl;
+          }
+          automata_.reset();
+          lexeme_start = c;
+          c--;
+        }
+        else {
+          std::runtime_error("bad token"); 
+        }
+      }
+    }
+
+    // One last time
+    std::string state = stringState(automata_.state());
+    auto dot   = state.find('.');
+    auto token = state = state.substr(1, dot-1);
+    if (automata_.accept()) {
+      if (token != "") {
+        std::cout << " lexeme - " << std::string(lexeme_start, c)
+                  << " token  - " << token << std::endl;
+      } 
+      automata_.reset();
+      lexeme_start = c;
+      c--;
+    } else {  
+      std::runtime_error("bad token");
+    }
+  }
+
+  std::pair<Token, Lexeme> consume() {
+    std::pair<Token, Lexeme> result = std::make_pair("", "");
+    if (begin_ != end_) {
+      auto lexeme_start = begin_;
+      while (automata_.exec(*begin_++));
+
+      std::string state = stringState(automata_.state());
+      auto dot   = state.find('.');
+      auto token = state.substr(1, dot-1);
+      if (automata_.accept()) {
+        result = std::make_pair(token, std::string(lexeme_start, begin_ - 1));
+        automata_.reset();
+        begin_--;
+      }
+      else { std::runtime_error("bad token"); }
+    }
+    current_ = result;
+    return result;
+  }
+
+  std::pair<Token, Lexeme> token() const {
+    return current_;
+  }
+
+  bool eof() const { return begin_ == end_; }
+  
+  void tokenize(const std::string::iterator& begin, const std::string::iterator& end) {
+    automata_.reset();
+    begin_ = begin;
+    end_   = end;
+  }
   
 private:
   Lexer(StringAutomata::State initialState, 
         StringAutomata::StateChanges changes, 
         StringAutomata::AcceptableStates acceptableStates) 
-    : StringAutomata(initialState, changes, acceptableStates) {
+    : automata_(StringAutomata(initialState, changes, acceptableStates).realize())
+    , end_     (begin_) 
+    , current_ (std::make_pair("", "")) {
   }
+
+  LexerAutomata            automata_;
+  Lexeme::iterator         begin_; 
+  Lexeme::iterator         end_;
+  std::pair<Token, Lexeme> current_;
 };
+
+typedef Lexer<std::string> StringLexer;
 
 Regex operator+ (const Regex& a, const Regex& b) {
   return Regex::seq(a,b);
@@ -450,88 +499,52 @@ int main () {
   auto identifier  = alpha + *(alphanum);
 
   try {
-    auto re = Lexer<std::string>::tokens({
-    {"",            skip},
-    {"ID",          identifier},
-    {"SYM",         Regex::match(":") + identifier},
-    {"NUM",         number},
-    {"IF",          Regex::match("if")},
-    {"WHILE",       Regex::match("while")},
-    {"UNTIL",       Regex::match("until")},
-    {"LOOP",        Regex::match("loop")},
-    {"WHEN",        Regex::match("when")},
-    {"DO",          Regex::match("do")},
-    {"VAL",         Regex::match("val")},
-    {"LET",         Regex::match("let")},
-    {"OPAREN",      Regex::match('(')},
-    {"CPAREN",      Regex::match(')')},
-    {"OBRACK",      Regex::match('[')},
-    {"CBRACK",      Regex::match(']')},
-    {"OBRACE",      Regex::match('{')},
-    {"CBRACE",      Regex::match('}')},
-    {"EQUAL",       Regex::match('=')},
-    {"PLUS",        Regex::match('+')},
-    {"SEMI",        Regex::match(';')},
-    {"COLON",       Regex::match(':')},
-    {"YIELDS",      Regex::match("->")},
-    });
+    auto lexer = StringLexer::tokens({
+      {"",            skip},
+      {"ID",          identifier},
+      {"SYM",         Regex::match(":") + identifier},
+      {"NUM",         number},
+      {"IF",          Regex::match("if")},
+      {"WHILE",       Regex::match("while")},
+      {"UNTIL",       Regex::match("until")},
+      {"LOOP",        Regex::match("loop")},
+      {"WHEN",        Regex::match("when")},
+      {"DO",          Regex::match("do")},
+      {"VAL",         Regex::match("val")},
+      {"LET",         Regex::match("let")},
+      {"OPAREN",      Regex::match('(')},
+      {"CPAREN",      Regex::match(')')},
+      {"OBRACK",      Regex::match('[')},
+      {"CBRACK",      Regex::match(']')},
+      {"OBRACE",      Regex::match('{')},
+      {"CBRACE",      Regex::match('}')},
+      {"EQUAL",       Regex::match('=')},
+      {"PLUS",        Regex::match('+')},
+      {"MINUS",       Regex::match('-')},
+      {"SEMI",        Regex::match(';')},
+      {"COLON",       Regex::match("::")},
+      {"COLON",       Regex::match(':')},
+      {"YIELDS",      Regex::match("->")},
+      }
+    );
 
-    //std::cout << "#----- DFA" << std::endl;
-    //std::cout << re.toString() << std::endl;
     std::cout << "realizing...";
     std::cout.flush();
-    auto re_dfa  = re.realize();
     std::cout << "done." << std::endl;
 
-    //std::cout << "#----- NFA" << std::endl;
-    //std::cout << re_dfa.toString() << std::endl;
+    
+    std::ifstream example("example");
+    
+    std::string test((std::istreambuf_iterator<char>(example)),
+                      std::istreambuf_iterator<char>());
+    
 
-    std::cout << "minimizing...";
-    std::cout << "TO BE IMPLEMENTED...";
-    std::cout << "done." << std::endl;
-
-    std::string test = 
-      "let add2 = (a : u8) -> u8{\n"
-      "  1 + 1\n"
-      "};\n"
-      "\n"
-      "val abcd = :abcd;\n";
-    auto lexeme_start = test.begin();
-    std::string::iterator c;
-    for (c = test.begin(); c != test.end(); c++) {
-      if (!re_dfa.exec(*c))  {
-        std::string state = stringState(re_dfa.state());
-        auto dot   = state.find('.');
-        auto token = state = state.substr(1, dot-1);
-        if (re_dfa.accept()) {
-          if (token != "") {
-            std::cout << " lexeme - " << std::string(lexeme_start, c)
-                      << " token  - " << token << std::endl;
-          }
-          re_dfa.reset();
-          lexeme_start = c;
-          c--;
-        }
-        else {
-          std::runtime_error("bad token"); 
-        }
+    lexer.tokenize(test.begin(), test.end());
+    while(!lexer.eof()) {
+      auto token = lexer.consume();
+      if (token.first != "") {
+      std::cout << "read: " << std::setw(10) << token.first << " = \'" << token.second << "\'" << std::endl;
       }
-    }
-
-    // One last time
-    std::string state = stringState(re_dfa.state());
-    auto dot   = state.find('.');
-    auto token = state = state.substr(1, dot-1);
-    if (re_dfa.accept()) {
-      if (token != "") {
-        std::cout << " lexeme - " << std::string(lexeme_start, c)
-                  << " token  - " << token << std::endl;
-      } 
-      re_dfa.reset();
-      lexeme_start = c;
-      c--;
-    } else {  
-      std::runtime_error("bad token");
     }
   } catch (std::exception& e) { 
     std::cout << "error: " << e.what() << std::endl;
