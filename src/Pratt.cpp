@@ -1,18 +1,5 @@
 #include "ParseNode.h"
-
-#include <regex>
-#include <algorithm>
-
-// A Lexer transforms some stream into stream of tokens
-template <typename S, typename T>
-struct Lexer {
-  typedef typename S::iterator              StreamIterator;
-  typedef typename std::vector<T>::iterator TokenIterator;
-
-  virtual TokenIterator currentToken() const = 0;
-  virtual void          advance()            = 0;
-};
-
+#include "Lexer.h"
 
 // This isn't a Parselet because it needs a left side 
 template <typename N, typename M = N, typename T = std::string>

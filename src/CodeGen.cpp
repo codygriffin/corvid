@@ -31,6 +31,14 @@ Module* makeLLVMModule() {
   Module* mod = new Module("code generation test", context);
   IRBuilder<> main_builder(context);
 
+  // Declare i32 @puts(i8*)
+  std::vector<Type*> putsArgs { 
+    main_builder.getInt8PtrTy()
+  };
+
+  FunctionType *putsType = llvm::FunctionType::get(main_builder.getInt32Ty(), putsArgs, false);
+  Function *putsFunc = llvm::Function::Create(putsType, llvm::Function::ExternalLinkage, "puts", mod);
+
   // Declare i32 @main(i32, i8**)
   std::vector<Type*> mainArgs = {
     main_builder.getInt32Ty(),
@@ -44,13 +52,6 @@ Module* makeLLVMModule() {
   mainFunc->setCallingConv(CallingConv::C);
   mainFunc->addFnAttr(Attribute::StackProtect);
 
-  // Declare i32 @puts(i8*)
-  std::vector<Type*> putsArgs { 
-    main_builder.getInt8PtrTy()
-  };
-
-  FunctionType *putsType = llvm::FunctionType::get(main_builder.getInt32Ty(), putsArgs, false);
-  Function *putsFunc = llvm::Function::Create(putsType, llvm::Function::ExternalLinkage, "puts", mod);
 
   Value *hello  = main_builder.CreateGlobalStringPtr("hello world!\n");
   //Value* retval = main_builder.CreateAlloca(Type::getInt32Ty(context), 0, "retval");
