@@ -1,12 +1,15 @@
+# Create a template (this creates no types)
 template (i8 N)
 type fib = {
   i8 value = fib(N)::value + fib(N-1)::value;
 }
 
+# instantiate a type from a template
 type fib(0) = {
   i8 value = 1;
 }
 
+# instantiate a type from a template
 type fib(1) = {
   i8 value = 1;
 }

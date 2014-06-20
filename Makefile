@@ -67,3 +67,9 @@ LEXER_CXXFLAGS    += -Iinc/
 LEXER_LDFLAGS     := -pthread 
 LEXER_SRCS        := src/Lexer.cpp 
 $(eval $(call APPLICATION,lexer))
+
+GEN_CXXFLAGS    := -std=gnu++0x -O3 -g
+GEN_CXXFLAGS    += -Iinc/ $(shell /usr/local/opt/llvm/bin/llvm-config --cxxflags)
+GEN_LDFLAGS     := -pthread $(shell /usr/local/opt/llvm/bin/llvm-config --ldflags --libs)
+GEN_SRCS        := src/CodeGen.cpp 
+$(eval $(call APPLICATION,gen))

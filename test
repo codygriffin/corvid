@@ -1,6 +1,0 @@
-(begin
-  (println "Hello, what is your name?")
-  (print "name: ")
-  (define name (prompt))
-  (print "Hello ")
-  (println name))
