@@ -442,6 +442,13 @@ struct Lexer {
     return current_;
   }
 
+  void consume(std::string token) {
+    auto match = nextToken();  
+    if (token != match.first) {
+      std::runtime_error("can't consume");
+    } 
+  }
+
   bool eof() const { return begin_ == end_; }
   
   void tokenize(const std::string::iterator& begin, const std::string::iterator& end) {

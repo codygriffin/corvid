@@ -1,21 +1,16 @@
-# Create a template (this creates no types)
-template (i8 N)
+template (328 N)
 type fib = {
-  i8 value = fib(N)::value(N-1) + fib(N-2)::value;
+  i32 value = fib(N)::value + fib(N-1)::value;
 }
 
-# instantiate a type from a template
 type fib(0) = {
-  i8 value = 1;
+  i32 value = 1;
 }
 
-# instantiate a type from a template
 type fib(1) = {
-  i8 value = 1;
+  i32 value = 1;
 }
 
-print(fib(0)::value); # should print 1
-print(fib(1)::value); # should print 1
-print(fib(2)::value); # should print 2
-print(fib(3)::value); # should print 3
-print(fib(4)::value); # should print 5
+i32 main(list(string) args) {
+  print fib(4)::value;
+}

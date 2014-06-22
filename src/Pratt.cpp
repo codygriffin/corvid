@@ -19,10 +19,16 @@ typedef std::function<
 > TokenNodeGenerator;
 
 struct Token {
-  Token(Rule r, int l, TokenNodeGenerator f) : value(""), rule(r), lbp(l), gen(f) {}
+  Token() {} 
+  Token(std::string i, int l, TokenNodeGenerator f) 
+    : value("")
+    , id(i)
+    , lbp(l)
+    , gen(f) {
+  }
 
   std::string        value;
-  Rule               rule;
+  std::string        id;
   int                lbp; 
   TokenNodeGenerator gen;
 };
@@ -34,19 +40,21 @@ struct ExpressionNode {
   , token_(token) 
   , match_ (match) {}
 
-  virtual ExpressionNode* prefix() {
+  virtual ExpressionNode* prefix(StringLexer& lex) {
     std::cout << ">> no prefix" << std::endl;
     //throw std::runtime_error("syntax error - no prefix");
     return 0;
   }
 
-  virtual ExpressionNode* infix(ExpressionNode* pLeft) {
+  virtual ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
     std::cout << ">> no infix" << std::endl;
     //throw std::runtime_error("syntax error - no infix");
     return 0;
   }
 
-  virtual bool infix() { return false; }
+  virtual bool infix() { 
+    return false; 
+  }
 
   void print(unsigned depth = 0) {
     std::string pos;
@@ -75,132 +83,75 @@ struct ExpressionNode {
 
 // AST node representing "" (Nothing, nil, null zilch)
 struct NilNode : public ExpressionNode { 
-  NilNode(const std::string& match = "wha?", Token token = Token(Rule(), 0, nullptr), int rbp = 0)
+  NilNode(const std::string& match = "wha?", Token token = Token("", 0, nullptr), int rbp = 0)
   : ExpressionNode(match, token, rbp) {}
 };
 
-struct Tokenizer {
-  template <typename F>
-  static ExpressionNode* next(F f) {
-    static std::vector<ExpressionNode*> pNodeHeap; 
-    pNodeHeap.clear();
-
-    std::cout << "Next token" << std::endl;
-    auto original = begin;
-
-    for (auto token : tokens_) {
-      std::cout << "\t tokenizing string: " << std::string(begin, end) << std::endl;
-      ParseNode* pNode = 0; 
-      try {
-        pNode = token.rule.parse(begin, end);
-      } catch (std::exception& e) {
-      }
-
-      if (pNode) {
-        //return new ExpressionNode(m->match, std::get<1>(v));
-        auto pNewExpressionNode = token.gen(pNode->match, token);
-        std::cout << "\t candidate token: " << pNewExpressionNode->match() << std::endl;
-        pNodeHeap.push_back(pNewExpressionNode);
-        // TODO move to operator < on Token
-        std::push_heap(pNodeHeap.begin(), pNodeHeap.end(), f);
-      }
-
-      // rewind for next try
-      begin = original;
-    }
-
-    if (!pNodeHeap.empty()) {
-      std::pop_heap(pNodeHeap.begin(), pNodeHeap.end());
-      auto pMatchedNode = pNodeHeap.back();
-      pNodeHeap.pop_back();
-      for (auto e : pNodeHeap) { delete e; }
-      begin = original + pMatchedNode->match().length();
-      std::cout << "\t matched token: " << pMatchedNode->match() << std::endl;
-      return pMatchedNode;
-    }
-    else {
-      std::cout << "\t no candidate tokens" << std::endl;
-      return new NilNode();
-    }
-  }
-
-  template <typename NodeType>
-  static void useToken(Rule token, int rbp) {
-    auto gen = [=](const std::string& match, Token token) -> ExpressionNode* {
-      token.value = match;
-      return new NodeType(match, token, rbp);
-    };
-
-    tokens_.push_back(Token(token, rbp, gen));
-  }
-
-  static void consume(const std::string& t) {
-    if (token->match() == t) {
-      token = next(
-        [=](ExpressionNode* pA, ExpressionNode* pB) {
-          if (!pA->infix() && pB->infix()) return true;
-          return pA->match().length() < pB->match().length();
-        });
-      std::cout << "\t after consuming " << t << ": " << std::string(begin, end) << std::endl;
-    }
-    //throw std::runtime_error("error consuming token");
-  }
-
-
-  static std::vector<Token> tokens_;
-  static ExpressionNode* token;
-  static std::string::iterator begin;
-  static std::string::iterator end;
-};
-
-std::vector<Token> Tokenizer::tokens_;
-ExpressionNode* Tokenizer::token;
-std::string::iterator Tokenizer::begin;
-std::string::iterator Tokenizer::end;
-
 struct Expression { // This should be a Parselet<>  
-  Expression(int rbp = 0) : rbp_(rbp) { }
+  Expression(StringLexer& lex, int rbp = 0) 
+    : lex_                  (lex)
+    , pCurrentExpressionNode_(0)
+    , rbp_                  (rbp) { 
+    pCurrentExpressionNode_     = nextPrefixExpressionNode();          
+  }
 
   // Execute the parser and decorate the node with some context
   // TODO tokenizer state is inside...
   ExpressionNode* parse() {
-    std::cout << "parsing expression\n";
-    auto pToken      = Tokenizer::token;     
-    std::cout << "token = " << pToken->match() << "\n";
-    Tokenizer::token = nextPrefixToken();          
-    std::cout << "next = " << Tokenizer::token->match() << "\n";
-    auto pLeft       = pToken->prefix();     
-    while (rbp_ < Tokenizer::token->lbp()) { 
-      pToken           = Tokenizer::token;    
-      Tokenizer::token = nextInfixToken();         
-      pLeft            = pToken->infix(pLeft);
+    std::cout << "parsing" << std::endl;
+    auto previousExpressionNode = pCurrentExpressionNode_;     
+    pCurrentExpressionNode_     = nextPrefixExpressionNode();          
+    auto pLeft                  = previousExpressionNode->prefix(lex_);     
+    while (rbp_ < pCurrentExpressionNode_->lbp()) { 
+      previousExpressionNode  = pCurrentExpressionNode_;    
+      pCurrentExpressionNode_ = nextInfixExpressionNode();         
+      pLeft                   = previousExpressionNode->infix(pLeft, lex_);
     }
   
     return pLeft;
   }
 
-  ExpressionNode* nextPrefixToken() {
-    return Tokenizer::next(
-      [=](ExpressionNode* pA, ExpressionNode* pB) {
-        if (!pA->infix() && pB->infix()) return true;
-        return pA->match().length() < pB->match().length();
-      });
+  ExpressionNode* nextPrefixExpressionNode() {
+    auto tokenId = lex_.nextToken();
+    auto token   = prefixOps_[tokenId.first];
+    return token.gen(tokenId.first, token);
   }
 
-  ExpressionNode* nextInfixToken() {
-    return Tokenizer::next(
-      [=](ExpressionNode* pA, ExpressionNode* pB) {
-        if (pA->infix() && !pB->infix()) return true;
-        return pA->match().length() < pB->match().length();
-      });
+  ExpressionNode* nextInfixExpressionNode() {
+    auto tokenId = lex_.nextToken();
+    auto token   = infixOps_[tokenId.first];
+    return token.gen(tokenId.first, token);
   }
 
   template <typename NodeType>
-  void useToken(std::string name, Rule token, int rbp) {
-    Tokenizer::useToken<NodeType>(name, token, rbp);
+  void usePrefix(std::string token, int rbp) {
+    prefixOps_[token] = Token(
+      token, 
+      rbp,  
+      [=](const std::string& match, Token token) -> ExpressionNode* {
+       token.value = match;
+       return new NodeType(match, token, rbp);
+      }
+    );
   }
 
-  int rbp_;
+  template <typename NodeType>
+  void useInfix(std::string token, int rbp) {
+    infixOps_[token] = Token(
+      token, 
+      rbp,  
+      [=](const std::string& match, Token token) -> ExpressionNode* {
+       token.value = match;
+       return new NodeType(match, token, rbp);
+      }
+    );
+  }
+
+  StringLexer&                 lex_;
+  ExpressionNode*              pCurrentExpressionNode_;
+  int                          rbp_;
+  std::map<std::string, Token> prefixOps_;
+  std::map<std::string, Token> infixOps_;
 };
 
 //struct PrefixParselet : public Parselet<ExpressionNode> {
@@ -216,11 +167,10 @@ struct Expression { // This should be a Parselet<>
 //  Rule rule_;
 //};
 
-
 struct LiteralNode : public ExpressionNode {
   LiteralNode(const std::string& match, Token token, int rbp) 
   : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* prefix() {
+  ExpressionNode* prefix(StringLexer& lex) {
     std::cout << "LITERAL = " << match_ << "\n";
     return this; 
   }
@@ -236,13 +186,11 @@ struct LiteralNode : public ExpressionNode {
 //  Rule rule_;
 //};
 
-
 struct Prefix : public ExpressionNode {
   Prefix(const std::string& match, Token token, int rbp) 
   : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* prefix() {
-    std::cout << "PREFIX = " << match_ << "\n";
-    this->pRight.reset(Expression(lbp()).parse());
+  ExpressionNode* prefix(StringLexer& lex) {
+    this->pRight.reset(Expression(lex, lbp()).parse());
     return this; 
   }
 };
@@ -250,13 +198,9 @@ struct Prefix : public ExpressionNode {
 struct InfixLeft : public ExpressionNode {
   InfixLeft(const std::string& match, Token token, int rbp) 
   : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* infix(ExpressionNode* pLeft) {
-    std::cout << "INFIX = " << match_ << "\n";
-    std::cout << " parsing rhs\n";
-    this->pRight.reset(Expression(lbp()).parse());
-    std::cout << " result rhs: " << pRight->match() << "\n";
+  ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
+    this->pRight.reset(Expression(lex, lbp()).parse());
     this->pLeft.reset(pLeft);
-    std::cout << " lhs: " << pLeft->match() << "\n";
     return this;
   }
   bool infix() { return true; }
@@ -265,10 +209,8 @@ struct InfixLeft : public ExpressionNode {
 struct InfixRight : public ExpressionNode {
   InfixRight(const std::string& match, Token token, int rbp) 
   : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* infix(ExpressionNode* pLeft) {
-    std::cout << "INFIXR = " << match_ << "\n";
-    this->pRight.reset(Expression(lbp()-1).parse());
-    std::cout << " result rhs: " << pRight->match() << "\n";
+  ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
+    this->pRight.reset(Expression(lex, lbp()-1).parse());
     this->pLeft.reset(pLeft);
     return this;
   }
@@ -278,84 +220,107 @@ struct InfixRight : public ExpressionNode {
 struct GroupLeft : public ExpressionNode {
   GroupLeft(const std::string& match, Token token, int rbp) 
   : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* prefix() {
-    std::cout << "GROUP = " << match_ << "\n";
-    std::cout << " parsing rhs\n";
-    this->pRight.reset(Expression(0).parse());
-    std::cout << " result rhs: " << pRight->match() << "\n";
-    std::cout << "closing w/ )\n"; 
-    Tokenizer::consume(")");
+  ExpressionNode* prefix(StringLexer& lex) {
+    this->pRight.reset(Expression(lex, 0).parse());
+    //Tokenizer::consume(")");
     return this;
   }
 };
 
-
 struct ApplyLeft : public ExpressionNode {
   ApplyLeft(const std::string& match, Token token, int rbp) 
   : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* infix(ExpressionNode* pLeft) {
-    std::cout << "INFIX = " << match_ << "\n";
-    std::cout << " parsing rhs\n";
-    this->pRight.reset(Expression(0).parse());
-    std::cout << " result rhs: " << pRight->match() << "\n";
-    std::cout << "closing w/ )\n"; 
-    Tokenizer::consume(")");
+  ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
+    this->pRight.reset(Expression(lex, 0).parse());
+    lex.consume(")");
     this->pLeft.reset(pLeft);
     return this;
   }
   bool infix() { return true; }
 };
 
-
 int main () {
-  Rule lalpha, lalphas, digit, digits, skip;
-  skip      = maybe(lit(' ') 
-                  | lit('\t') 
-                  | lit('\n'));
+  auto skip         = Regex::symbol(' ') | Regex::symbol('\n') | Regex::symbol('\t');
+  auto digit        = Regex::range('0', '9');
+  auto lower        = Regex::range('a', 'z');
+  auto upper        = Regex::range('A', 'Z');
+  auto alpha        = lower | upper;
+  auto alphanum     = alpha | digit;
+  auto number       = digit + *digit;
+  auto identifier   = alpha + *(alphanum);
+  auto eol          = Regex::symbol('\n');
+  auto noteol       = Regex::exclude('\n');
+  auto notpound     = Regex::exclude('#');
+  auto linecomment  = Regex::symbol('#') + *noteol + eol;
+  auto multicomment = Regex::match("##") + *notpound + Regex::match("##");
+  auto comment      = linecomment; // | multicomment;
+  auto string       = Regex::symbol('\"') + *Regex::exclude('\"') + Regex::symbol('\"');
 
-  auto _ = [&](Rule rule) { return skip + rule + skip; };
+  try {
+    auto lexer = StringLexer::tokens({
+      {"SKIP",        skip},
+      {"COMMENT",     comment},
+      {"STRING",      string},
+      {"SYM",         Regex::match(":") + identifier},
+      {"NUM",         number},
+      {"0IF",         Regex::match("if")},
+      {"0WHILE",      Regex::match("while")},
+      {"0UNTIL",      Regex::match("until")},
+      {"0LOOP",       Regex::match("loop")},
+      {"0WHEN",       Regex::match("when")},
+      {"0DO",         Regex::match("do")},
+      {"0VAL",        Regex::match("val")},
+      {"0LET",        Regex::match("let")},
+      {"0TEMPLATE",   Regex::match("template")},
+      {"0TYPE",       Regex::match("type")},
+      {"0TRUE",       Regex::match("true")},
+      {"0FALSE",      Regex::match("false")},
+      {"1ID",         identifier},
+      {"OPAREN",      Regex::match('(')},
+      {"CPAREN",      Regex::match(')')},
+      {"OBRACK",      Regex::match('[')},
+      {"CBRACK",      Regex::match(']')},
+      {"OBRACE",      Regex::match('{')},
+      {"CBRACE",      Regex::match('}')},
+      {"ASSIGN",      Regex::match('=')},
+      {"EQUALS",      Regex::match("==")},
+      {"PLUS",        Regex::match('+')},
+      {"MINUS",       Regex::match('-')},
+      {"STAR",        Regex::match('*')},
+      {"BSLASH",      Regex::match('\\')},
+      {"SEMI",        Regex::match(';')},
+      {"COLONS",      Regex::match("::")},
+      {"COLON",       Regex::match(':')},
+      {"DOT",         Regex::match('.')},
+      {"AT",          Regex::match('@')},
+      {"ARROW",       Regex::match("->")},
+      });
 
-  lalpha    = range('a', 'z');
-  digit     = range('0', '9');
-  lalphas   = seq(lalpha, maybe(lazy(lalphas)));
-  digits    = seq(digit,  maybe(lazy(digits)));
+    std::cout << "realizing...";
+    std::cout.flush();
+    std::cout << "done." << std::endl;
+    
+    std::ifstream example("example");
+    
+    std::string test((std::istreambuf_iterator<char>(example)),
+                      std::istreambuf_iterator<char>());
 
-  Tokenizer::useToken<NilNode>       (_(Rule()),           0);
-  Tokenizer::useToken<NilNode>       (_(lit(")")),         0);
-  Tokenizer::useToken<LiteralNode>   (_(lalphas | digits), 0);
-  Tokenizer::useToken<GroupLeft>     (_(lit("(")),         0);
-  Tokenizer::useToken<InfixLeft>     (_(lit("+")),        10);
-  Tokenizer::useToken<InfixLeft>     (_(lit("-")),        10);
-  Tokenizer::useToken<InfixLeft>     (_(lit("*")),        20);
-  Tokenizer::useToken<InfixRight>    (_(lit("**")),       30);
-  Tokenizer::useToken<Prefix>        (_(lit("-")),       100);
-  Tokenizer::useToken<InfixLeft>     (_(lit(".")),       200);
-  Tokenizer::useToken<ApplyLeft>     (_(lit("(")),       500);
- 
-  Expression expr(0);
+    Expression expr(lexer);
+    expr.usePrefix<NilNode>    ("",               0);
+    expr.usePrefix<LiteralNode>("DIGIT",          0);
+    expr.useInfix<GroupLeft>   ("OPAREN(",        0);
+    expr.useInfix<InfixLeft>   ("PLUS",           10);
+    expr.useInfix<InfixLeft>   ("STAR",           20);
+    expr.usePrefix<Prefix>     ("MINUS",          100);
+    expr.useInfix<InfixLeft>   ("DOT",            200);
+    expr.useInfix<ApplyLeft>   ("OPAREN",         500);
 
-  //auto test = std::string("(12 * (c + -b)).add(122)");
-  auto test = std::string("fn(1+1)+(4*3)");
-  auto b = test.begin();
-  auto e = test.end();
-  Tokenizer::begin = b;
-  Tokenizer::end   = e;
-  Tokenizer::token = Tokenizer::next(
-    [=](ExpressionNode* pA, ExpressionNode* pB) {
-      if (pA->infix() && !pB->infix()) return true;
-      return pA->match().length() < pB->match().length();
-    });
+    test = "12+31";
+    lexer.tokenize(test.begin(), test.end());
 
-  if (b < e) {
-    try {
-      ExpressionNode* pRoot = expr.parse();
-      if (pRoot) {
-        pRoot->print();
-        delete pRoot;
-      }
-    }
-    catch (std::exception& e) {
-      std::cout << e.what() << std::endl;
-    }
+    auto pNode = expr.parse();
+
+  } catch (std::exception& e) { 
+    std::cout << "error: " << e.what() << std::endl;
   }
 }

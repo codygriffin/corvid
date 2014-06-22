@@ -1,5 +1,7 @@
 #include <Lexer.h>
 
+//------------------------------------------------------------------------------
+
 int main() {
   std::cout << "Lexer Test" << std::endl;
 
@@ -49,6 +51,8 @@ int main() {
       {"EQUALS",      Regex::match("==")},
       {"PLUS",        Regex::match('+')},
       {"MINUS",       Regex::match('-')},
+      {"STAR",        Regex::match('*')},
+      {"BSLASH",      Regex::match('\\')},
       {"SEMI",        Regex::match(';')},
       {"COLONS",      Regex::match("::")},
       {"COLON",       Regex::match(':')},
