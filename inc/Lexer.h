@@ -359,11 +359,12 @@ private:
   }
 };
 
-template <typename Token = std::string>
+template <typename TokenType = std::string>
 struct Lexer {
-  typedef StringAutomata::Realized LexerAutomata;
-  typedef std::string              Lexeme;
-  typedef std::list<std::pair<Token, StringAutomata>> LexerSpec;
+  typedef StringAutomata::Realized                        LexerAutomata;
+  typedef std::string                                     Lexeme;
+  typedef std::list<std::pair<TokenType, StringAutomata>> LexerSpec;
+  typedef std::pair<TokenType, Lexeme>                    Token;
 
   static Lexer tokens(const LexerSpec& patterns) {
     auto states = StringAutomata::StateChanges({
@@ -399,7 +400,7 @@ struct Lexer {
     return "";
   }
 
-  std::pair<Token, Lexeme> nextToken() {
+  Token nextToken() {
     if (begin_ != end_) {
       // save the beginning of the lexeme
       auto lexeme_start = begin_;
@@ -430,7 +431,12 @@ struct Lexer {
         automata_.reset();
         // go back a character
         begin_--;
-        return current_;
+
+        if (token == "SKIP") { //This is pretty hacky...
+          return nextToken();
+        } else {
+          return current_;
+        }
       }     
     }
 
@@ -438,15 +444,24 @@ struct Lexer {
     return  std::make_pair("", "");
   }
 
-  std::pair<Token, Lexeme> token() const {
+  Token token() const {
     return current_;
   }
 
   void consume(std::string token) {
     auto match = nextToken();  
     if (token != match.first) {
-      std::runtime_error("can't consume");
+      throw std::runtime_error("can't consume");
     } 
+  }
+
+  Token lookahead() {
+    auto begin = begin_;
+    auto old   = current_;
+    auto token = nextToken();
+    begin_     = begin;
+    current_   = old;
+    return token;
   }
 
   bool eof() const { return begin_ == end_; }
@@ -476,7 +491,7 @@ private:
 
   Lexeme::iterator         begin_; 
   Lexeme::iterator         end_;
-  std::pair<Token, Lexeme> current_;
+  Token                    current_;
   uint32_t                 lineNum_;
   uint32_t                 colNum_;
 };

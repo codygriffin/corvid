@@ -1,60 +1,52 @@
 #include "ParseNode.h"
 #include "Lexer.h"
 
-// This isn't a Parselet because it needs a left side 
-template <typename N, typename M = N, typename T = std::string>
-struct InfixParselet {
-  typedef typename T::iterator                                      Iterator;
-  typedef N                                                         NodeType;
-  typedef N                                                         LeftType;
-  typedef std::function<NodeType* (Iterator& begin, Iterator& end)> Parser;
-
-  virtual NodeType* parse(LeftType* pLeft) const = 0;
-};
-
 struct ExpressionNode;
 struct Token;
 typedef std::function<
   ExpressionNode* (const std::string& match, Token token)
 > TokenNodeGenerator;
 
+// This should be in Lexer
 struct Token {
   Token() {} 
-  Token(std::string i, int l, TokenNodeGenerator f) 
-    : value("")
-    , id(i)
-    , lbp(l)
-    , gen(f) {
+  Token(std::string i, std::string v) 
+    : id(i)
+    , value(v) {
   }
 
   std::string        value;
   std::string        id;
-  int                lbp; 
-  TokenNodeGenerator gen;
 };
 
-// This really ought to be a ParseNode
+struct ExpressionNode;
+struct ExpressionParser;
+
+struct ExpressionParselet {
+  ExpressionParselet(int precedence = 0) : precedence_(precedence) {}
+
+  virtual ExpressionNode* prefix(ExpressionParser* pParser) {
+    throw std::runtime_error("syntax error - no prefix");
+    return 0;
+  }
+
+  virtual ExpressionNode* infix(ExpressionParser* pParser, ExpressionNode* pLeft) {
+    throw std::runtime_error("syntax error - no infix");
+    return 0;
+  }
+
+  int precedence() const {   
+    return precedence_; 
+  }
+
+  int precedence_;
+};
+
 struct ExpressionNode {
-  ExpressionNode(const std::string& match, Token token, int lbp = 0) 
-  : lbp_(lbp)
-  , token_(token) 
-  , match_ (match) {}
-
-  virtual ExpressionNode* prefix(StringLexer& lex) {
-    std::cout << ">> no prefix" << std::endl;
-    //throw std::runtime_error("syntax error - no prefix");
-    return 0;
-  }
-
-  virtual ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
-    std::cout << ">> no infix" << std::endl;
-    //throw std::runtime_error("syntax error - no infix");
-    return 0;
-  }
-
-  virtual bool infix() { 
-    return false; 
-  }
+  ExpressionNode(Token token, ExpressionNode* pLeft = 0, ExpressionNode* pRight = 0) 
+  : token_(token) 
+  , pLeft_(pLeft) 
+  , pRight_(pRight) {}
 
   void print(unsigned depth = 0) {
     std::string pos;
@@ -63,180 +55,121 @@ struct ExpressionNode {
               << depth << ": ";
 
     std::cout << std::setfill(' ')   << std::setw(15) 
-              << token_.value 
+              << token_.id 
               << std::string(4, ' ') << std::string(2*depth, '-') 
-              << " "                 << '\'' << match_ << '\'' <<  std::endl;
+              << " "                 << '\'' << match() << '\'' <<  std::endl;
 
-    if (pLeft.get())  pLeft->print(depth+1);
-    if (pRight.get()) pRight->print(depth+1);
+    if (pLeft_.get())  pLeft_->print(depth+1);
+    if (pRight_.get()) pRight_->print(depth+1);
   }
-  
-  int lbp() const { return lbp_; }  //XXX
-  const std::string& match() const { return match_; }
 
-  int lbp_;
-  Token token_;
-  std::string match_;
-  std::unique_ptr<ExpressionNode> pLeft;
-  std::unique_ptr<ExpressionNode> pRight;
+  const std::string& match() const { return token_.value; }
+
+  Token                           token_;
+  std::unique_ptr<ExpressionNode> pLeft_;
+  std::unique_ptr<ExpressionNode> pRight_;
 };
 
 // AST node representing "" (Nothing, nil, null zilch)
 struct NilNode : public ExpressionNode { 
-  NilNode(const std::string& match = "wha?", Token token = Token("", 0, nullptr), int rbp = 0)
-  : ExpressionNode(match, token, rbp) {}
+  NilNode(Token token = Token("", ""))
+  : ExpressionNode(token) {}
 };
 
-struct Expression { // This should be a Parselet<>  
-  Expression(StringLexer& lex, int rbp = 0) 
-    : lex_                  (lex)
-    , pCurrentExpressionNode_(0)
-    , rbp_                  (rbp) { 
-    pCurrentExpressionNode_     = nextPrefixExpressionNode();          
-  }
+struct ExpressionParser { 
+  ExpressionParser(StringLexer& lex) 
+    : lex_  (lex) { }
 
-  // Execute the parser and decorate the node with some context
-  // TODO tokenizer state is inside...
-  ExpressionNode* parse() {
-    std::cout << "parsing" << std::endl;
-    auto previousExpressionNode = pCurrentExpressionNode_;     
-    pCurrentExpressionNode_     = nextPrefixExpressionNode();          
-    auto pLeft                  = previousExpressionNode->prefix(lex_);     
-    while (rbp_ < pCurrentExpressionNode_->lbp()) { 
-      previousExpressionNode  = pCurrentExpressionNode_;    
-      pCurrentExpressionNode_ = nextInfixExpressionNode();         
-      pLeft                   = previousExpressionNode->infix(pLeft, lex_);
+  ExpressionNode* parse(int precedence = 0) {
+    auto token          = lex_.nextToken();
+    auto prefixParselet = prefixOps_.find(token.first);
+    if (prefixParselet == prefixOps_.end()) {
+      throw std::runtime_error("syntax error");
     }
-  
+    auto pLeft          = prefixParselet->second->prefix(this);     
+
+    while (precedence < getInfixPrecedence()) { 
+      token              = lex_.nextToken();
+      auto infixParselet = infixOps_.find(token.first);
+      if (infixParselet == infixOps_.end()) {
+        throw std::runtime_error("syntax error");
+      }
+      pLeft              = infixParselet->second->infix(this, pLeft);     
+    }
     return pLeft;
   }
-
-  ExpressionNode* nextPrefixExpressionNode() {
-    auto tokenId = lex_.nextToken();
-    auto token   = prefixOps_[tokenId.first];
-    return token.gen(tokenId.first, token);
+   
+  int getInfixPrecedence() {
+    auto infixParselet = infixOps_.find(lex_.lookahead().first);
+    if (infixParselet == infixOps_.end()) return 0;
+    return infixParselet->second->precedence();
   }
 
-  ExpressionNode* nextInfixExpressionNode() {
-    auto tokenId = lex_.nextToken();
-    auto token   = infixOps_[tokenId.first];
-    return token.gen(tokenId.first, token);
+  void usePrefix(ExpressionParselet* pParselet, std::string token) {
+    prefixOps_[token] = pParselet;
   }
 
-  template <typename NodeType>
-  void usePrefix(std::string token, int rbp) {
-    prefixOps_[token] = Token(
-      token, 
-      rbp,  
-      [=](const std::string& match, Token token) -> ExpressionNode* {
-       token.value = match;
-       return new NodeType(match, token, rbp);
-      }
-    );
+  void useInfix(ExpressionParselet* pParselet, std::string token) {
+    infixOps_[token] = pParselet;
   }
 
-  template <typename NodeType>
-  void useInfix(std::string token, int rbp) {
-    infixOps_[token] = Token(
-      token, 
-      rbp,  
-      [=](const std::string& match, Token token) -> ExpressionNode* {
-       token.value = match;
-       return new NodeType(match, token, rbp);
-      }
-    );
-  }
+  StringLexer& getLexer() { return lex_; }
 
-  StringLexer&                 lex_;
-  ExpressionNode*              pCurrentExpressionNode_;
-  int                          rbp_;
-  std::map<std::string, Token> prefixOps_;
-  std::map<std::string, Token> infixOps_;
+  StringLexer&                               lex_;
+  std::map<std::string, ExpressionParselet*> prefixOps_;
+  std::map<std::string, ExpressionParselet*> infixOps_;
 };
 
-//struct PrefixParselet : public Parselet<ExpressionNode> {
-//  PrefixParselet(Rule rule) : rule_ (rule) {}
-//  ExpressionNode* parse(Iterator& first, Iterator& last) const {
-//    auto pNode = rule_.parse(first, last); // get token
-//
-//    auto pExpressionNode = new ExpressionNode(pNode->match, "PREFIX_OP", 100);
-//    pExpressionNode->pRight.reset(Expression(100).parse());
-//    return pExpressionNode;
-//  }
-//private:
-//  Rule rule_;
-//};
-
-struct LiteralNode : public ExpressionNode {
-  LiteralNode(const std::string& match, Token token, int rbp) 
-  : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* prefix(StringLexer& lex) {
-    std::cout << "LITERAL = " << match_ << "\n";
-    return this; 
+// Some simple ExpressionParselets
+struct Literal : public ExpressionParselet {
+  ExpressionNode* prefix(ExpressionParser* pParser) {
+    auto token = pParser->getLexer().token();
+    return new ExpressionNode(Token(token.first, token.second)); 
   }
 };
 
-//struct LiteralParselet : public Parselet<ExpressionNode> {
-//  LiteralParselet(Rule rule) : rule_ (rule) {}
-//  ExpressionNode* parse(Iterator& first, Iterator& last) const {
-//    auto pNode = rule_.parse(first, last); // get token
-//    return new ExpressionNode(pNode->match, "LITERAL", 0);
-//  }
-//private:
-//  Rule rule_;
-//};
-
-struct Prefix : public ExpressionNode {
-  Prefix(const std::string& match, Token token, int rbp) 
-  : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* prefix(StringLexer& lex) {
-    this->pRight.reset(Expression(lex, lbp()).parse());
-    return this; 
+struct Prefix : public ExpressionParselet {
+  Prefix(int precedence) : ExpressionParselet(precedence) {} 
+  ExpressionNode* prefix(ExpressionParser* pParser) {
+    auto token = pParser->getLexer().token();
+    return new ExpressionNode(Token(token.first, token.second), 0, pParser->parse());
   }
 };
 
-struct InfixLeft : public ExpressionNode {
-  InfixLeft(const std::string& match, Token token, int rbp) 
-  : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
-    this->pRight.reset(Expression(lex, lbp()).parse());
-    this->pLeft.reset(pLeft);
-    return this;
-  }
-  bool infix() { return true; }
-};
-
-struct InfixRight : public ExpressionNode {
-  InfixRight(const std::string& match, Token token, int rbp) 
-  : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
-    this->pRight.reset(Expression(lex, lbp()-1).parse());
-    this->pLeft.reset(pLeft);
-    return this;
-  }
-  bool infix() { return true; }
-};
-
-struct GroupLeft : public ExpressionNode {
-  GroupLeft(const std::string& match, Token token, int rbp) 
-  : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* prefix(StringLexer& lex) {
-    this->pRight.reset(Expression(lex, 0).parse());
-    //Tokenizer::consume(")");
-    return this;
+struct InfixLeft : public ExpressionParselet {
+  InfixLeft(int precedence) : ExpressionParselet(precedence) {} 
+  ExpressionNode* infix(ExpressionParser* pParser, ExpressionNode* pLeft) {
+    auto token = pParser->getLexer().token();
+    return new ExpressionNode(Token(token.first, token.second), pLeft, pParser->parse(precedence()));
   }
 };
 
-struct ApplyLeft : public ExpressionNode {
-  ApplyLeft(const std::string& match, Token token, int rbp) 
-  : ExpressionNode(match, token, rbp) {}
-  ExpressionNode* infix(ExpressionNode* pLeft, StringLexer& lex) {
-    this->pRight.reset(Expression(lex, 0).parse());
-    lex.consume(")");
-    this->pLeft.reset(pLeft);
-    return this;
+struct InfixRight : public ExpressionParselet {
+  InfixRight(int precedence) : ExpressionParselet(precedence) {} 
+  ExpressionNode* infix(ExpressionParser* pParser, ExpressionNode* pLeft) {
+    auto token = pParser->getLexer().token();
+    return new ExpressionNode(Token(token.first, token.second), pLeft, pParser->parse(precedence() - 1));
   }
-  bool infix() { return true; }
+};
+
+struct GroupLeft : public ExpressionParselet {
+  GroupLeft(int precedence = 0) : ExpressionParselet(precedence) {} 
+  ExpressionNode* prefix(ExpressionParser* pParser) {
+    auto token = pParser->getLexer().token();
+    auto pGroup = new ExpressionNode(Token(token.first, token.second), 0, pParser->parse());
+    pParser->getLexer().consume("CPAREN");
+    return pGroup;
+  }
+};
+
+struct ApplyLeft : public ExpressionParselet {
+  ApplyLeft(int precedence) : ExpressionParselet(precedence) {} 
+  ExpressionNode* infix(ExpressionParser* pParser, ExpressionNode* pLeft) {
+    auto token = pParser->getLexer().token();
+    auto pApply = new ExpressionNode(Token(token.first, token.second), pLeft, pParser->parse(0));
+    pParser->getLexer().consume("CPAREN");
+    return pApply;
+  }
 };
 
 int main () {
@@ -258,8 +191,7 @@ int main () {
 
   try {
     auto lexer = StringLexer::tokens({
-      {"SKIP",        skip},
-      {"COMMENT",     comment},
+      {"SKIP",        skip | comment},
       {"STRING",      string},
       {"SYM",         Regex::match(":") + identifier},
       {"NUM",         number},
@@ -292,6 +224,7 @@ int main () {
       {"COLONS",      Regex::match("::")},
       {"COLON",       Regex::match(':')},
       {"DOT",         Regex::match('.')},
+      {"COMMA",       Regex::match(',')},
       {"AT",          Regex::match('@')},
       {"ARROW",       Regex::match("->")},
       });
@@ -305,21 +238,23 @@ int main () {
     std::string test((std::istreambuf_iterator<char>(example)),
                       std::istreambuf_iterator<char>());
 
-    Expression expr(lexer);
-    expr.usePrefix<NilNode>    ("",               0);
-    expr.usePrefix<LiteralNode>("DIGIT",          0);
-    expr.useInfix<GroupLeft>   ("OPAREN(",        0);
-    expr.useInfix<InfixLeft>   ("PLUS",           10);
-    expr.useInfix<InfixLeft>   ("STAR",           20);
-    expr.usePrefix<Prefix>     ("MINUS",          100);
-    expr.useInfix<InfixLeft>   ("DOT",            200);
-    expr.useInfix<ApplyLeft>   ("OPAREN",         500);
+    // Define a simple expression parser
+    ExpressionParser expr(lexer);
+    expr.usePrefix(new Literal(),      "NUM");
+    expr.usePrefix(new Literal(),      "1ID");
+    expr.useInfix (new InfixLeft(10),  "PLUS");
+    expr.useInfix (new InfixLeft(20),  "STAR");
+    expr.usePrefix(new GroupLeft(0),   "OPAREN");
+    expr.usePrefix(new Prefix(100),    "MINUS");
+    expr.useInfix (new InfixLeft(200), "DOT");
+    expr.useInfix (new ApplyLeft(500), "OPAREN");
+    expr.useInfix (new InfixLeft(600), "COMMA");
 
-    test = "12+31";
+    test = "foo.bar(12 + abc)";
     lexer.tokenize(test.begin(), test.end());
 
     auto pNode = expr.parse();
-
+    pNode->print();
   } catch (std::exception& e) { 
     std::cout << "error: " << e.what() << std::endl;
   }
