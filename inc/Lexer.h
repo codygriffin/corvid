@@ -69,7 +69,7 @@ struct Automata {
   bool exec(Input input) {
     auto transition = stateChanges_.at(currentState_);
     if (transition.count(input) > 1) {
-      throw std::runtime_error("need to realize NFA");
+      //throw std::runtime_error("need to realize NFA");
     }
 
     if (transition.count(input) == 0) {
@@ -364,7 +364,13 @@ struct Lexer {
   typedef StringAutomata::Realized                        LexerAutomata;
   typedef std::string                                     Lexeme;
   typedef std::list<std::pair<TokenType, StringAutomata>> LexerSpec;
-  typedef std::pair<TokenType, Lexeme>                    Token;
+  //typedef std::pair<TokenType, Lexeme>                    Token;
+
+  struct Token {
+    TokenType type;
+    Lexeme    lexeme;
+    Token(const TokenType& t, const Lexeme& l) : type(t), lexeme(l) {}
+  };
 
   static Lexer tokens(const LexerSpec& patterns) {
     auto states = StringAutomata::StateChanges({
@@ -424,7 +430,7 @@ struct Lexer {
       // if its an acceptable state
       if (automata_.accept()) {
         // create the token
-        current_ = std::make_pair(token, std::string(lexeme_start, begin_ - 1));
+        current_ = Token(token, std::string(lexeme_start, begin_ - 1));
         lineNum_ += lineNum;
         colNum_  += colNum;
         // reset
@@ -441,17 +447,17 @@ struct Lexer {
     }
 
     std::runtime_error("bad token"); 
-    return  std::make_pair("", "");
+    return Token("", "");
   }
 
   Token token() const {
     return current_;
   }
 
-  void consume(std::string token) {
+  void expect(std::string token) {
     auto match = nextToken();  
-    if (token != match.first) {
-      throw std::runtime_error("can't consume");
+    if (token != match.type) {
+      //throw std::runtime_error("can't consume");
     } 
   }
 
@@ -484,7 +490,7 @@ private:
         StringAutomata::AcceptableStates acceptableStates) 
     : automata_(StringAutomata(initialState, changes, acceptableStates).realize())
     , end_     (begin_) 
-    , current_ (std::make_pair("", "")) {
+    , current_ (Token("", "")) {
   }
 
   LexerAutomata            automata_;

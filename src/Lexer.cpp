@@ -73,10 +73,10 @@ int main() {
     lexer.tokenize(test.begin(), test.end());
     while(!lexer.eof()) {
       auto token = lexer.nextToken();
-      if (token.first != "SKIP" && token.first != "COMMENT" && token.first != "") {
-        auto lexeme = token.second;
+      if (token.type != "SKIP" && token.type != "") {
+        auto lexeme = token.lexeme;
         lexeme.erase(std::remove(lexeme.begin(), lexeme.end(), '\n'), lexeme.end());
-        std::cout << "read: " << std::setw(10) << token.first << " = \'" << lexeme << "\'" << std::endl;
+        std::cout << "read: " << std::setw(10) << token.type << " = \'" << lexeme << "\'" << std::endl;
       }
     }
   } catch (std::exception& e) { 

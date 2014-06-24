@@ -73,3 +73,9 @@ GEN_CXXFLAGS    += -Iinc/ $(shell /usr/local/opt/llvm/bin/llvm-config --cxxflags
 GEN_LDFLAGS     := -pthread $(shell /usr/local/opt/llvm/bin/llvm-config --ldflags --libs)
 GEN_SRCS        := src/CodeGen.cpp 
 $(eval $(call APPLICATION,gen))
+
+SQUID_CXXFLAGS    := -std=gnu++0x -O3 -g
+SQUID_CXXFLAGS    += -Iinc/ $(shell /usr/local/opt/llvm/bin/llvm-config --cxxflags)
+SQUID_LDFLAGS     := -pthread $(shell /usr/local/opt/llvm/bin/llvm-config --ldflags --libs)
+SQUID_SRCS        := src/Squid.cpp 
+$(eval $(call APPLICATION,squid))
